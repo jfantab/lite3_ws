@@ -115,11 +115,6 @@ class ArucoNode(rclpy.node.Node):
         )
         self.get_logger().info(f"Image topic: {image_topic}")
 
-        depth_image_topic = (
-            self.get_parameter("depth_image_topic").get_parameter_value().string_value
-        )
-        self.get_logger().info(f"Aligned RGB and depth image topic: {image_topic}")
-
         info_topic = (
             self.get_parameter("camera_info_topic").get_parameter_value().string_value
         )
@@ -150,10 +145,6 @@ class ArucoNode(rclpy.node.Node):
             Image, image_topic, self.image_callback, qos_profile_sensor_data
         )
 
-        self.create_subscription(
-            Image, depth_image_topic, self.depth_image_callback, qos_profile_sensor_data
-        )
-
         # Set up publishers
         self.poses_pub = self.create_publisher(PoseArray, "aruco_poses", 10)
         self.markers_pub = self.create_publisher(ArucoMarkers, "aruco_markers", 10)
@@ -177,22 +168,13 @@ class ArucoNode(rclpy.node.Node):
         # Assume that camera parameters will remain the same...
         self.destroy_subscription(self.info_sub)
 
-    def depth_image_callback(self, img_msg):
-        # if self.info_msg is None:
-        #     self.get_logger().warn("No aligned RGB and depth image info has been received!")
-        #     return
-
-        # if len(self.pose_array) > 0:
-        #     pose = self.pose_array[-1][0]
-        pass
-
     def image_callback(self, img_msg):
         if self.info_msg is None:
             self.get_logger().warn("No camera info has been received!")
             return
 
         cv_image = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding="mono8")
-        cv_image = cv2.rotate(cv_image, cv2.ROTATE_180)
+        # cv_image = cv2.rotate(cv_image, cv2.ROTATE_180)
 
         markers = ArucoMarkers()
         pose_array = PoseArray()
@@ -242,7 +224,6 @@ class ArucoNode(rclpy.node.Node):
                 pose.position.x = tvecs[i][0][0]
                 pose.position.y = tvecs[i][1][0]
                 pose.position.z = tvecs[i][2][0]
-                self.get_logger().info(f"pose: {pose}")
 
                 rot_matrix = np.eye(4)
                 rot_matrix[0:3, 0:3] = cv2.Rodrigues(np.array(rvecs[i]))[0]
@@ -256,8 +237,7 @@ class ArucoNode(rclpy.node.Node):
                 pose_array.poses.append(pose)
                 markers.poses.append(pose)
                 markers.marker_ids.append(marker_id[0])
-            self.get_logger().info("====================")
-            
+
             # Draw detected markers and their IDs on the image
             cv2.aruco.drawDetectedMarkers(cv_image, corners, marker_ids)
 

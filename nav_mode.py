@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# TODO: fix thread locking issues
+
 HEARTBEAT = int(os.getenv("HEARTBEAT"), 0)
 ZERO = int(os.getenv("ZERO"), 0)
 STAND_UP_LIE_DOWN = int(os.getenv("STAND_UP_LIE_DOWN"), 0)

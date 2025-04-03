@@ -1,0 +1,13 @@
+tags:
+- id: 0
+    label: msse 
+    reached: false
+- id: 1
+    label: mscsc
+    reached: false
+- id: 2
+    label: nursing
+    reached: false
+- id: 3
+    label: psych
+    reached: false
