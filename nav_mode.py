@@ -7,8 +7,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# TODO: fix thread locking issues
-
 HEARTBEAT = int(os.getenv("HEARTBEAT"), 0)
 ZERO = int(os.getenv("ZERO"), 0)
 STAND_UP_LIE_DOWN = int(os.getenv("STAND_UP_LIE_DOWN"), 0)
@@ -20,6 +18,7 @@ class Auto():
         self.local_port = local_port
         self.server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
         self.ctrl_addr = (ctrl_ip, ctrl_port)
+        self.stop_event = threading.Event()
         self.initialize()
 
     def send_command(self, command, param1=0, param2=0):
@@ -30,13 +29,23 @@ class Auto():
             print("Failure sending command: ", {e})
 
     def background(self):
-        while True:
+        while not self.stop_event.is_set():
             self.send_command(HEARTBEAT)
             time.sleep(0.5)
+        print("Background thread stopping")
 
     def initialize(self):
         self.back = threading.Thread(name="background", target=self.background)
         self.back.start()
+
+        try:
+            while not self.stop_event.is_set():
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            self.stop_event.set()
+        finally:
+            self.back.join()
+            print("Stopped all threads.")
 
         self.send_command(ZERO)
         self.send_command(STAND_UP_LIE_DOWN)

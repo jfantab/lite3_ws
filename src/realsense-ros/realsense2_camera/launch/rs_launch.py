@@ -116,13 +116,7 @@ def launch_setup(context, params, param_name_suffix=''):
             output=_output,
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level' + param_name_suffix)],
             emulate_tty=True,
-            )
-        # launch_ros.actions.Node(
-        #     package="tf2_ros",
-        #     name="static_transform_flip",
-        #     executable="static_transform_publisher",
-        #     arguments=["0", "0", "0", "0", "0", "3.14159", "camera_link", "camera_color_frame"],
-        # )
+        )
     ]
 
 def generate_launch_description():

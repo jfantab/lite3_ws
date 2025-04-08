@@ -36,7 +36,9 @@ def generate_launch_description():
             # 'align_depth.enable': 'false', 
             # 'enable_sync': 'false',
             # 'enable_depth': 'false'
-            'color_fps': "15"
+            # 'enable_gyro': 'true',
+            # 'enable_accel': 'true',
+            # 'unite_imu_method': '2'
         }.items()
     )
 

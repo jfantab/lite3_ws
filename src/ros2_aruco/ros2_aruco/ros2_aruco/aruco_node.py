@@ -37,6 +37,7 @@ import tf_transformations
 from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseArray, Pose
+from std_msgs.msg import Float64, Float64MultiArray
 from ros2_aruco_interfaces.msg import ArucoMarkers
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
@@ -174,7 +175,12 @@ class ArucoNode(rclpy.node.Node):
             return
 
         cv_image = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding="mono8")
-        # cv_image = cv2.rotate(cv_image, cv2.ROTATE_180)
+        # cv_image = cv2.undistort(cv_image, self.intrinsic_mat, self.distortion)
+
+        height, width = cv_image.shape
+
+        center_x = height // 2
+        center_y = width // 2
 
         markers = ArucoMarkers()
         pose_array = PoseArray()
@@ -201,6 +207,10 @@ class ArucoNode(rclpy.node.Node):
                 [-marker_length/2, -marker_length/2, 0]
             ], dtype=np.float32)
 
+            marker_centers = []
+            yaws = []
+            offsets = []
+
             # For each detected marker
             rvecs, tvecs = [], []
             for corner in corners:
@@ -211,8 +221,28 @@ class ArucoNode(rclpy.node.Node):
                     self.intrinsic_mat,
                     self.distortion
                 )
-                
+                    
                 if success:
+                    # Get center
+                    marker_center = [np.sum(corner[0][:,0]) // 4, np.sum(corner[0][:,1]) // 4]
+                    marker_centers.append(marker_center)
+
+                    # Calculate the yaw
+                    offset = marker_center[0] - center_x
+                    fx = self.intrinsic_mat[0][0]
+                    angle = np.arctan2(offset, fx)
+                    corrected_angle = (angle + np.pi) % (2 * np.pi) - np.pi
+                    
+                    offsets.append(float(offset))
+                    yaws.append(float(corrected_angle))
+
+                    # self.get_logger().info(f"{cv_image.shape} | {center_x}, {center_y}")
+                    # self.get_logger().info(f"corner: {corner[0]}")
+                    # self.get_logger().info(f"offset: {offset}")
+                    # self.get_logger().info(f"fx: {fx}")
+                    # self.get_logger().info(f"angle: {corrected_angle}")
+                    # self.get_logger().info(f"aruco marker center: {marker_center}")
+
                     rvecs.append(rvec)
                     tvecs.append(tvec)
                 else:
@@ -235,6 +265,8 @@ class ArucoNode(rclpy.node.Node):
                 pose.orientation.w = quat[3]
 
                 pose_array.poses.append(pose)
+                markers.yaw_angles.append(float(yaws[i]))
+                markers.offsets.append(float(offsets[i]))
                 markers.poses.append(pose)
                 markers.marker_ids.append(marker_id[0])
 
