@@ -18,38 +18,61 @@ class Auto():
         self.local_port = local_port
         self.server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
         self.ctrl_addr = (ctrl_ip, ctrl_port)
-        self.stop_event = threading.Event()
-        self.initialize()
 
+        # self.socket_lock = threading.Lock()
+        # self.stop_event = threading.Event()
+        self.back = threading.Thread(name="background", target=self.background)
+        
     def send_command(self, command, param1=0, param2=0):
+        if self.server._closed:  # Check if socket is usable
+            print("Socket connection closed")
+            return False
+
+        packet = struct.pack('<3i', command, param1, param2)
         try:
-            packet = struct.pack('<3i', command, param1, param2)
             self.server.sendto(packet, self.ctrl_addr)
-        except Exception as e:
-            print("Failure sending command: ", {e})
+        except (OSError, struct.error) as e:
+            print("Failure sending command: ", {str(e)})
 
     def background(self):
-        while not self.stop_event.is_set():
+        # while not self.stop_event.is_set():
+        while True:
             self.send_command(HEARTBEAT)
             time.sleep(0.5)
-        print("Background thread stopping")
+        print("Background thread stopping...")
 
     def initialize(self):
-        self.back = threading.Thread(name="background", target=self.background)
+        # if self.back and self.back.is_alive():
+        #     print("Background thread running...")
+        #     return
+        print("Initializing...")
+
+        # self.stop_event.clear()
         self.back.start()
 
-        try:
-            while not self.stop_event.is_set():
-                time.sleep(0.5)
-        except KeyboardInterrupt:
-            self.stop_event.set()
-        finally:
-            self.back.join()
-            print("Stopped all threads.")
-
         self.send_command(ZERO)
+        time.sleep(2)
+
         self.send_command(STAND_UP_LIE_DOWN)
+        time.sleep(2)
         self.send_command(NAV_MODE)
+        time.sleep(2)
+
+    def shutdown(self):
+        print("Shutting down!")
+        # self.send_command(STAND_UP_LIE_DOWN)
         
-a = Auto()
+        # self.stop_event.set()
+        # if self.back:
+        #     self.back.join(timeout=2)
+
+if __name__ == "__main__":    
+    a = Auto()
+    a.initialize()
+    # try: 
+    #     a.initialize()
+    #     while True:
+    #         time.sleep(1)
+    # except KeyboardInterrupt:
+    #     a.shutdown()
 

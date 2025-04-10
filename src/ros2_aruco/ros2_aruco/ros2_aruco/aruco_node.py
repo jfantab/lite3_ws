@@ -270,20 +270,21 @@ class ArucoNode(rclpy.node.Node):
                 markers.poses.append(pose)
                 markers.marker_ids.append(marker_id[0])
 
-            # Draw detected markers and their IDs on the image
-            cv2.aruco.drawDetectedMarkers(cv_image, corners, marker_ids)
+            ### For debugging in RViz
+            # # Draw detected markers and their IDs on the image
+            # cv2.aruco.drawDetectedMarkers(cv_image, corners, marker_ids)
 
-            # Draw axes
-            for i in range(len(marker_ids)):
-                cv2.drawFrameAxes(cv_image, self.intrinsic_mat, self.distortion,
-                                rvecs[i], tvecs[i], self.marker_size)
+            # # Draw axes
+            # for i in range(len(marker_ids)):
+            #     cv2.drawFrameAxes(cv_image, self.intrinsic_mat, self.distortion,
+            #                     rvecs[i], tvecs[i], self.marker_size)
 
-            # Convert annotated OpenCV image back to ROS2 Image message
-            annotated_image_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding="mono8")
-            annotated_image_msg.header = img_msg.header
+            # # Convert annotated OpenCV image back to ROS2 Image message
+            # annotated_image_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding="mono8")
+            # annotated_image_msg.header = img_msg.header
 
-            # Publish the annotated image
-            self.aruco_img_pub.publish(annotated_image_msg)
+            # # Publish the annotated image
+            # self.aruco_img_pub.publish(annotated_image_msg)
 
             # Publish pose and markers
             self.poses_pub.publish(pose_array)
