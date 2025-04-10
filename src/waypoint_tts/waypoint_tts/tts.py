@@ -45,6 +45,7 @@ class TTS(Node):
         ###
         self.err_dist = 0
         self.err_theta = 0
+        self.err_offset = 0
 
         ###
         self.latest_markers = None
@@ -91,7 +92,7 @@ class TTS(Node):
     def setState(self, state):
         self.state = state
 
-    def move(self, linear_velocity, angular_velocity, y_velocity=0):
+    def move(self, linear_velocity, angular_velocity, y_velocity=0.0):
         msg = Twist()
         msg.linear.x = linear_velocity
         msg.linear.y = y_velocity
@@ -122,40 +123,43 @@ class TTS(Node):
             return
 
         # TODO
-        if not odom:
+        if not cur_odom:
             pass
 
-        cur_position = odom.pose.pose.position
+        # cur_position = odom.pose.pose.position
 
         match self.state:
             case ARUCO_STATE.IDLE:
                 self.get_logger().info("[INFO] Idle state...")
 
+                self.move(0.0, 0.0)
+
             case ARUCO_STATE.SEARCHING:
                 self.get_logger().info("[INFO] Searching state...")
 
                 if not markers:
+                    ### Lateral PID movement
+                    # offset = markers.offsets[-1]
+
+                    # Kp_dist, Ki_dist, Kd_dist = 0.05, 0.1, 0.05
+                    # integral_dist = 0.0
+                    # previous_err_dist = 0.0
+
+                    # self.err_offset = offset
+
                     # Slowly rotate the robot
                     self.move(0.0, 0.3)
+                else:
+                    self.get_logger().info(f"Aruco marker detected with ID {markers.marker_ids[-1]}")
+                    self.setState(ARUCO_STATE.DETECTED)
                     return
-
-                ### TODO: figure out PID for horizontal movement to
-                ###       center the tag in camera's FOV
-                # Kp_dist, Ki_dist, Kd_dist = 0.05, 0.1, 0.05
-
-                ### TODO: figure out condition here
-                # if markers and len(markers.marker_ids) > 0 and self.cur_id in markers.marker_ids:
-                #     self.setState(ARUCO_STATE.DETECTED)
-                #     return
-                
-                offset = markers.offsets[-1]
 
             case ARUCO_STATE.DETECTED:
                 self.get_logger().info("[INFO] Detected state...")
 
                 # params
                 Kp_dist, Ki_dist, Kd_dist = 0.05, 0.1, 0.05
-                Kp_theta, Ki_theta, Kd_theta = 0.15, 0.25, 0.1
+                Kp_theta, Ki_theta, Kd_theta = 0.1, 0.2, 0.1
 
                 # obtain depth or linear distance
                 depth = markers.poses[-1].position.z
@@ -188,12 +192,11 @@ class TTS(Node):
                     return
 
                 # PID control for angular velocity
-                if abs(self.err_theta) >= 0.05:
+                if abs(self.err_theta) >= 0.01:
                     a_v = Kp_theta * self.err_theta + Ki_theta * integral_theta + Kd_theta * (self.err_theta - previous_err_theta)
-                    # a_v = a_v * -1
                     previous_err_theta = self.err_theta
                 else:
-                    self.get_logger().info(f"Robot stopping as goal heading is within tolerance")
+                    self.get_logger().info(f"Goal heading is within tolerance")
                     a_v = 0.0
                     
                 self.move(l_v, -a_v)
@@ -242,60 +245,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-'''
-header:
-  stamp:
-    sec: 1980
-    nanosec: 989259712
-  frame_id: odom
-pose:
-  pose:
-    position:
-      x: 1.9869206752407795
-      y: 5.4515822736145925
-      z: 0.3261604505586008
-    orientation:
-      x: 0.0
-      y: 0.0
-      z: 0.024067529310749517
-      w: 0.9997103350635504
-  covariance:
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
-  - 0.0
----
-'''
