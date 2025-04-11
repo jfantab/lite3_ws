@@ -47,6 +47,12 @@ class TTS(Node):
         self.err_theta = 0
         self.err_offset = 0
 
+        # initialize integral and derivative terms
+        self.integral_dist = 0.0
+        self.previous_err_dist = 0.0
+        self.integral_theta = 0.0
+        self.previous_err_theta = 0.0
+
         ###
         self.latest_markers = None
         self.marker_mutex = Lock()
@@ -126,8 +132,6 @@ class TTS(Node):
         if not cur_odom:
             pass
 
-        # cur_position = odom.pose.pose.position
-
         match self.state:
             case ARUCO_STATE.IDLE:
                 self.get_logger().info("[INFO] Idle state...")
@@ -137,41 +141,35 @@ class TTS(Node):
             case ARUCO_STATE.SEARCHING:
                 self.get_logger().info("[INFO] Searching state...")
 
-                if not markers:
-                    ### Lateral PID movement
-                    # offset = markers.offsets[-1]
-
-                    # Kp_dist, Ki_dist, Kd_dist = 0.05, 0.1, 0.05
-                    # integral_dist = 0.0
-                    # previous_err_dist = 0.0
-
-                    # self.err_offset = offset
-
-                    # Slowly rotate the robot
-                    self.move(0.0, 0.3)
-                else:
+                if markers and markers.marker_ids and self.cur_id in markers.marker_ids:
                     self.get_logger().info(f"Aruco marker detected with ID {markers.marker_ids[-1]}")
                     self.setState(ARUCO_STATE.DETECTED)
                     return
 
+                self.move(0.0, 0.3)
+
             case ARUCO_STATE.DETECTED:
                 self.get_logger().info("[INFO] Detected state...")
 
+                if not markers: 
+                    self.setState(ARUCO_STATE.SEARCHING)
+                    return
+
+                # robot dog rpy
+                orientation = cur_odom.pose.pose.orientation
+                r, p, y = euler_from_quaternion([orientation.x, orientation.y, orientation.z, orientation.w])
+
+                self.get_logger().info(f"Current robot yaw: {y}")
+
                 # params
-                Kp_dist, Ki_dist, Kd_dist = 0.05, 0.1, 0.05
-                Kp_theta, Ki_theta, Kd_theta = 0.1, 0.2, 0.1
+                Kp_dist, Ki_dist, Kd_dist = 0.05, 0.05, 0.0
+                Kp_theta, Ki_theta, Kd_theta = 0.08, 0.1, 0.15
 
                 # obtain depth or linear distance
                 depth = markers.poses[-1].position.z
 
                 # obtain offset or yaw to turn robot
                 yaw = markers.yaw_angles[-1]
-
-                # initialize integral and derivative terms
-                integral_dist = 0.0
-                previous_err_dist = 0.0
-                integral_theta = 0.0
-                previous_err_theta = 0.0
 
                 # errors
                 self.err_dist = depth
@@ -182,31 +180,35 @@ class TTS(Node):
 
                 # PID control for linear velocity
                 if self.err_dist >= 0.5:
-                    l_v = Kp_dist * abs(self.err_dist) + Ki_dist * integral_dist + Kd_dist * (self.err_dist - previous_err_dist)
-                    previous_err_dist = self.err_dist
+                    l_v = Kp_dist * abs(self.err_dist) + Ki_dist * self.integral_dist + Kd_dist * (self.err_dist - self.previous_err_dist)
+                    self.previous_err_dist = self.err_dist
                 else:
                     self.get_logger().info(f"Robot stopping as goal distance is within tolerance")
                     l_v = 0.0
+                    self.integral_dist = 0.0
+                    self.previous_err_dist = 0.0
                     self.move(0.0, 0.0)
                     self.setState(ARUCO_STATE.GOAL)
                     return
-
+                    
                 # PID control for angular velocity
                 if abs(self.err_theta) >= 0.01:
-                    a_v = Kp_theta * self.err_theta + Ki_theta * integral_theta + Kd_theta * (self.err_theta - previous_err_theta)
-                    previous_err_theta = self.err_theta
+                    a_v = Kp_theta * self.err_theta + Ki_theta * self.integral_theta + Kd_theta * (self.err_theta - self.previous_err_theta)
+                    self.previous_err_theta = self.err_theta
                 else:
                     self.get_logger().info(f"Goal heading is within tolerance")
                     a_v = 0.0
+                    self.integral_theta = 0.0
+                    self.previous_err_theta = 0.0 
                     
-                self.move(l_v, -a_v)
+                self.move(l_v, a_v)
 
             case ARUCO_STATE.GOAL:
                 self.get_logger().info("[INFO] Goal state...")
 
-                if self.cur_id >= self.goal_id:
-                    self.setState(ARUCO_STATE.IDLE)
-                    return
+                # if self.cur_id > self.goal_id:
+                #     self.setState(ARUCO_STATE.IDLE)
+                #     return
 
                 if not markers:
                     self.get_logger().warn("[WARN] No markers!")
