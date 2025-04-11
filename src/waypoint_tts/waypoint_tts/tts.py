@@ -116,6 +116,10 @@ class TTS(Node):
             self.latest_odom = odom 
             self.get_logger().debug(f"New odom: {odom}")
 
+    # save images every 5 seconds 
+    # turn params super small, view images
+    # dynamic params as it gets closer
+
     def timer_callback(self):
         # check mutex
         with self.marker_mutex:
