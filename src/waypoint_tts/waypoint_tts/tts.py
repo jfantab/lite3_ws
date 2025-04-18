@@ -180,7 +180,7 @@ class TTS(Node):
 
                         self.get_logger().info(f"Yaw is {yaw}")
 
-                        if abs(yaw) < 0.1:
+                        if abs(yaw) < 0.01:
                             self.move(0.0, 0.0)
                             self.integral_theta = 0.0
                             self.previous_err_theta = 0.0
@@ -326,7 +326,7 @@ class TTS(Node):
     def angular_pid(self):
         av = 0.0
 
-        Kp_theta, Ki_theta, Kd_theta = 0.1, 0.1, 0.15
+        Kp_theta, Ki_theta, Kd_theta = 0.1, 0.08, 0.15
 
         proportional = Kp_theta * self.err_theta
 
