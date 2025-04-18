@@ -70,7 +70,7 @@ class TTS(Node):
 
         self.twist_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         
-        self.timer_period = 1.0
+        self.timer_period = 0.5
         self.timer = self.create_timer(self.timer_period, self.timer_callback, callback_group=self.timer_cb_group)
         
         ###
@@ -145,15 +145,63 @@ class TTS(Node):
                 self.move(0.0, 0.0)
 
             case ARUCO_STATE.SEARCHING:
-                self.get_logger().info("[INFO] Searching state...")
-                if markers and markers.marker_ids and self.cur_id in markers.marker_ids:
-                    yaw = markers.yaw_angles[-1]
-                    self.get_logger().info(f"Aruco marker detected with ID {markers.marker_ids[-1]}")
-                    self.setState(ARUCO_STATE.DETECTED)
+                if self.cur_id == self.goal_id:
+                    self.setState(ARUCO_STATE.IDLE)
                     return
+                if markers and markers.marker_ids:
+                    self.get_logger().info(f"[INFO] markers.marker_ids: {markers.marker_ids}")
 
-                self.move(0.0, 0.3)
+                    if self.cur_id in markers.marker_ids:
+                        self.get_logger().info(f"[INFO] Found marker with ID {self.cur_id}")
+                        index = markers.marker_ids.index(self.cur_id)
 
+                        self.get_logger().info(f"Aruco marker detected with ID {markers.marker_ids[index]}")
+                        self.setState(ARUCO_STATE.DETECTED)
+                    else:
+                        # Keep looking for correct marker
+                        self.get_logger().info("[INFO] Searching state...")
+                        self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
+                        self.move(0.0, 0.3)
+
+                else:
+                    # Keep looking for correct marker
+                    self.get_logger().info("[INFO] Searching state...")
+                    self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
+                    self.move(0.0, 0.3)
+
+            case ARUCO_STATE.ADJUSTING:
+                if markers and markers.marker_ids:
+                    self.get_logger().info(f"[INFO] markers.marker_ids: {markers.marker_ids}")
+
+                    if self.cur_id in markers.marker_ids:
+                        self.get_logger().info(f"[INFO] Found marker with ID {self.cur_id}")
+                        index = markers.marker_ids.index(self.cur_id)
+                        yaw = markers.yaw_angles[index]
+
+                        self.get_logger().info(f"Yaw is {yaw}")
+
+                        if abs(yaw) < 0.1:
+                            self.move(0.0, 0.0)
+                            self.integral_theta = 0.0
+                            self.previous_err_theta = 0.0
+                            self.get_logger().info(f"Aruco marker detected with ID {markers.marker_ids[index]}")
+                            self.setState(ARUCO_STATE.DETECTED)
+                        else:
+                            self.get_logger().info("[INFO] Getting into position")
+                            self.err_theta = yaw 
+                            av = self.angular_pid()
+                            self.move(0.0, av)
+                    else:
+                        # Keep looking for correct marker
+                        self.get_logger().info("[INFO] Searching state...")
+                        self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
+                        self.move(0.0, 0.3)
+                else:
+                    # Keep looking for correct marker
+                    self.get_logger().info("[INFO] Searching state...")
+                    self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
+                    self.move(0.0, 0.3)
+            
             case ARUCO_STATE.DETECTED:
                 self.get_logger().info("[INFO] Detected state...")
 
@@ -161,24 +209,38 @@ class TTS(Node):
                     self.move(0.0, 0.0)
                     self.setState(ARUCO_STATE.SEARCHING)
                     return
+                
+                if self.cur_id not in markers.marker_ids:
+                    self.move(0.0, 0.0)
+                    self.setState(ARUCO_STATE.SEARCHING)
+                    return
 
-                self.get_logger().info("[INFO] Moving towards detected marker...")
+                self.get_logger().info(f"[INFO] Moving towards detected marker...")
+
+                # get correct marker
+                index = markers.marker_ids.index(self.cur_id)
+                self.get_logger().info(f"[INFO] Detected marker is ID {markers.marker_ids[index]}")
 
                 # robot dog rpy
                 orientation = cur_odom.pose.pose.orientation
                 r, p, y = euler_from_quaternion([orientation.x, orientation.y, orientation.z, orientation.w])
 
-                self.get_logger().info(f"Current robot yaw: {y}")
-
                 # obtain depth or linear distance
-                marker_x = markers.poses[-1].position.x
-                depth = markers.poses[-1].position.z
+                marker_x = markers.poses[index].position.x
+                depth = markers.poses[index].position.z
 
                 # obtain yaw to turn robot
-                yaw = markers.yaw_angles[-1]
+                yaw = markers.yaw_angles[index]
+
+                # offset
+                offset = markers.offsets[index]
 
                 # adjust for skew
                 adjusted_depth = depth * math.cos(yaw) - marker_x * math.sin(yaw)
+
+                # log info
+                self.get_logger().info(f"Current robot yaw: {yaw}")
+                self.get_logger().info(f"Current robot offset: {offset}")
 
                 # errors
                 self.err_dist = adjusted_depth
@@ -186,15 +248,14 @@ class TTS(Node):
 
                 lv, av = 0.0, 0.0
 
-                if self.err_theta >= 0.1:
+                if abs(self.err_theta) >= 0.1:
                     av = self.angular_pid()
-                else: 
-                    self.get_logger().info(f"Goal heading is within tolerance")
-                    av = 0.0
+                else:
+                    av = self.angular_pid() * 0.5
 
-                if self.err_dist >= 0.5:
+                if abs(self.err_dist) >= 0.5:
                     lv = self.linear_pid()
-                else: 
+                else:
                     self.get_logger().info(f"Goal distance is within tolerance")
                     lv, av = 0.0, 0.0
 
@@ -212,10 +273,6 @@ class TTS(Node):
 
             case ARUCO_STATE.GOAL:
                 self.get_logger().info("[INFO] Goal state...")
-
-                # if self.cur_id != self.goal_id:
-                #     self.setState(ARUCO_STATE.IDLE)
-                #     return
 
                 if not markers:
                     self.get_logger().warn("[WARN] No markers!")
@@ -247,7 +304,7 @@ class TTS(Node):
     def linear_pid(self):
         lv = 0.0
 
-        Kp_dist, Ki_dist, Kd_dist = 0.03, 0.02, 0.1
+        Kp_dist, Ki_dist, Kd_dist = 0.015, 0.01, 0.1
 
         proportional = Kp_dist * self.err_dist
 
@@ -269,7 +326,7 @@ class TTS(Node):
     def angular_pid(self):
         av = 0.0
 
-        Kp_theta, Ki_theta, Kd_theta = 0.01, 0.02, 0.1
+        Kp_theta, Ki_theta, Kd_theta = 0.1, 0.1, 0.15
 
         proportional = Kp_theta * self.err_theta
 

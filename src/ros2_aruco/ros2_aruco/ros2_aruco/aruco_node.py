@@ -155,10 +155,17 @@ class ArucoNode(rclpy.node.Node):
         self.info_msg = None
         self.intrinsic_mat = None
         self.distortion = None
-
+        
         # self.aruco_dictionary = cv2.aruco.Dictionary(dictionary_id, int(self.marker_size))
         self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_250)
         self.aruco_parameters = cv2.aruco.DetectorParameters()
+        self.aruco_parameters.errorCorrectionRate = 0.6  # Higher values = stricter (default: 0.6)
+        self.aruco_parameters.adaptiveThreshWinSizeMin = 5  # Larger values reduce noise sensitivity
+        self.aruco_parameters.minMarkerPerimeterRate = 0.1  # Reject small blobs (default: 0.03)
+        self.aruco_parameters.polygonalApproxAccuracyRate = 0.05  # Stricter contour precision
+        self.aruco_parameters.minDistanceToBorder = 100 # Try not to detect markers on the edge of the image
+        self.aruco_parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        self.aruco_parameters.cornerRefinementWinSize = 5
         self.detector = cv2.aruco.ArucoDetector(self.aruco_dictionary, self.aruco_parameters)
         self.bridge = CvBridge()
 
@@ -199,7 +206,7 @@ class ArucoNode(rclpy.node.Node):
 
         if marker_ids is not None:
             # Define marker coordinate system
-            marker_length = 0.150  # in meters (match your actual marker size)
+            marker_length = self.marker_size  # in meters (match your actual marker size)
             obj_points = np.array([
                 [-marker_length/2,  marker_length/2, 0],
                 [ marker_length/2,  marker_length/2, 0],
@@ -228,7 +235,7 @@ class ArucoNode(rclpy.node.Node):
                     marker_centers.append(marker_center)
 
                     # Calculate the yaw
-                    offset = marker_center[0] - center_x
+                    offset = center_x - marker_center[0]
                     fx = self.intrinsic_mat[0][0]
                     angle = np.arctan2(offset, fx)
                     corrected_angle = (angle + np.pi) % (2 * np.pi) - np.pi
