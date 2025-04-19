@@ -80,19 +80,23 @@ class TTS(Node):
         self.goal_id = 2
         self.landmarks = [
             {
-                "label": "msse",
+                "label": "eng1",
                 "reached": False
             },
             {
-                "label": "mscs",
+                "label": "eng2",
                 "reached": False
             },
             {
-                "label": "nursing",
+                "label": "eng3",
                 "reached": False
             },
             {
-                "label": "psych",
+                "label": "eng4",
+                "reached": False
+            },
+            {
+                "label": "eng5",
                 "reached": False
             }
         ]
@@ -145,7 +149,7 @@ class TTS(Node):
                 self.move(0.0, 0.0)
 
             case ARUCO_STATE.SEARCHING:
-                if self.cur_id == self.goal_id:
+                if self.cur_id > self.goal_id:
                     self.setState(ARUCO_STATE.IDLE)
                     return
                 if markers and markers.marker_ids:
@@ -180,7 +184,7 @@ class TTS(Node):
 
                         self.get_logger().info(f"Yaw is {yaw}")
 
-                        if abs(yaw) < 0.01:
+                        if abs(yaw) < 0.3:
                             self.move(0.0, 0.0)
                             self.integral_theta = 0.0
                             self.previous_err_theta = 0.0
@@ -225,9 +229,11 @@ class TTS(Node):
                 orientation = cur_odom.pose.pose.orientation
                 r, p, y = euler_from_quaternion([orientation.x, orientation.y, orientation.z, orientation.w])
 
-                # obtain depth or linear distance
+                # obtain depth using Euclidean norm
                 marker_x = markers.poses[index].position.x
-                depth = markers.poses[index].position.z
+                marker_y = markers.poses[index].position.y
+                marker_z = markers.poses[index].position.z
+                depth = math.sqrt(marker_x**2 + marker_y**2 + marker_z**2)
 
                 # obtain yaw to turn robot
                 yaw = markers.yaw_angles[index]
@@ -236,24 +242,24 @@ class TTS(Node):
                 offset = markers.offsets[index]
 
                 # adjust for skew
-                adjusted_depth = depth * math.cos(yaw) - marker_x * math.sin(yaw)
+                # adjusted_depth = depth * math.cos(yaw) - marker_x * math.sin(yaw)
 
                 # log info
                 self.get_logger().info(f"Current robot yaw: {yaw}")
                 self.get_logger().info(f"Current robot offset: {offset}")
 
                 # errors
-                self.err_dist = adjusted_depth
+                self.err_dist = depth
                 self.err_theta = yaw
 
                 lv, av = 0.0, 0.0
 
-                if abs(self.err_theta) >= 0.1:
+                if abs(self.err_theta) >= 0.6:
                     av = self.angular_pid()
                 else:
-                    av = self.angular_pid() * 0.5
+                    av = 0.0
 
-                if abs(self.err_dist) >= 0.5:
+                if abs(self.err_dist) >= 0.8:
                     lv = self.linear_pid()
                 else:
                     self.get_logger().info(f"Goal distance is within tolerance")
@@ -304,7 +310,7 @@ class TTS(Node):
     def linear_pid(self):
         lv = 0.0
 
-        Kp_dist, Ki_dist, Kd_dist = 0.015, 0.01, 0.1
+        Kp_dist, Ki_dist, Kd_dist = 0.015, 0.01, 0.15
 
         proportional = Kp_dist * self.err_dist
 
@@ -312,11 +318,14 @@ class TTS(Node):
         self.integral_dist = np.clip(self.integral_dist, -0.2, 0.2)
 
         derivative = Kd_dist * ((self.err_dist - self.previous_err_dist) / self.timer_period)
-        derivative = np.clip(derivative, -0.1, 0.1)
+        derivative = np.clip(derivative, -0.2, 0.2)
 
         lv = proportional + self.integral_dist + derivative
-                
-        lv = np.clip(lv, -0.5, 0.5)  # m/s
+
+        linear_scale = np.clip(math.cos(self.err_theta), 0.1, 1.0)  # Range: 0.1 to 1.0
+        scaled_lv = lv * linear_scale
+
+        lv = np.clip(lv, -0.5, 0.5) # m/s
 
         self.previous_err_dist = self.err_dist
 
@@ -326,18 +335,21 @@ class TTS(Node):
     def angular_pid(self):
         av = 0.0
 
-        Kp_theta, Ki_theta, Kd_theta = 0.1, 0.08, 0.15
+        Kp_theta, Ki_theta, Kd_theta = 0.1, 0.12, 0.15
+        Kp_theta = 0.1 * (1 - 0.8 * np.clip(self.err_dist / 4.0, 0.0, 1.0))  # Reduce Kp at long distances
+        Ki_theta = 0.12
+        Kd_theta = 0.15 * (1 + 0.5 * np.clip(self.err_dist / 4.0, 0.0, 1.0)) # Increase damping at long distances
 
         proportional = Kp_theta * self.err_theta
 
         self.integral_theta += Ki_theta * self.err_theta * self.timer_period 
-        self.integral_theta = np.clip(self.integral_theta, -0.2, 0.2)
+        self.integral_theta = np.clip(self.integral_theta, -0.15, 0.15)
 
         derivative = Kd_theta * ((self.err_theta - self.previous_err_theta) / self.timer_period)
-        derivative = np.clip(derivative, -0.1, 0.1)
+        derivative = np.clip(derivative, -0.20, 0.20)
 
         av = proportional + self.integral_theta + derivative
-        av = np.clip(av, -1.0, 1.0)  # rad/s
+        av = np.clip(av, -0.5, 0.5)  # rad/s
 
         self.previous_err_theta = self.err_theta
 

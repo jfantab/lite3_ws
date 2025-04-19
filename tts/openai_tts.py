@@ -10,7 +10,8 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 VOICE="ash"
 
-departments = ["mscs", "msse", "nursing", "psych"]
+# departments = ["mscs", "msse", "nursing", "psych"]
+departments = ["eng1", "eng2", "eng3", "eng4", "eng5"]
 
 for d in departments:
 

@@ -163,7 +163,7 @@ class ArucoNode(rclpy.node.Node):
         self.aruco_parameters.adaptiveThreshWinSizeMin = 5  # Larger values reduce noise sensitivity
         self.aruco_parameters.minMarkerPerimeterRate = 0.1  # Reject small blobs (default: 0.03)
         self.aruco_parameters.polygonalApproxAccuracyRate = 0.05  # Stricter contour precision
-        self.aruco_parameters.minDistanceToBorder = 100 # Try not to detect markers on the edge of the image
+        self.aruco_parameters.minDistanceToBorder = 150 # Try not to detect markers on the edge of the image
         self.aruco_parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.aruco_parameters.cornerRefinementWinSize = 5
         self.detector = cv2.aruco.ArucoDetector(self.aruco_dictionary, self.aruco_parameters)
@@ -235,15 +235,15 @@ class ArucoNode(rclpy.node.Node):
                     marker_centers.append(marker_center)
 
                     # Calculate the yaw
-                    offset = marker_center[0] - center_x
+                    offset = center_x - marker_center[0] 
                     fx = self.intrinsic_mat[0][0]
                     angle = np.arctan2(offset, fx)
                     corrected_angle = (angle + np.pi) % (2 * np.pi) - np.pi
-                    self.get_logger().info("==============================================")
+                    self.get_logger().info("===========================================")
                     self.get_logger().info(f"z distance: {tvec[2][0]}")
                     self.get_logger().info(f"offset: {offset} | fx: {fx} | angle: {angle}")
                     self.get_logger().info(f"corrected_angle: {corrected_angle}")
-                    self.get_logger().info("==============================================")
+                    self.get_logger().info("============================================")
                     
                     offsets.append(float(offset))
                     yaws.append(float(corrected_angle))
