@@ -152,6 +152,7 @@ class TTS(Node):
                 if self.cur_id > self.goal_id:
                     self.setState(ARUCO_STATE.IDLE)
                     return
+
                 if markers and markers.marker_ids:
                     self.get_logger().info(f"[INFO] markers.marker_ids: {markers.marker_ids}")
 
@@ -160,7 +161,7 @@ class TTS(Node):
                         index = markers.marker_ids.index(self.cur_id)
 
                         self.get_logger().info(f"Aruco marker detected with ID {markers.marker_ids[index]}")
-                        self.setState(ARUCO_STATE.DETECTED)
+                        self.setState(ARUCO_STATE.ADJUSTING)
                     else:
                         # Keep looking for correct marker
                         self.get_logger().info("[INFO] Searching state...")
@@ -174,6 +175,7 @@ class TTS(Node):
                     self.move(0.0, 0.3)
 
             case ARUCO_STATE.ADJUSTING:
+                self.get_logger().info(f"[INFO] Adjusting state")
                 if markers and markers.marker_ids:
                     self.get_logger().info(f"[INFO] markers.marker_ids: {markers.marker_ids}")
 
@@ -184,7 +186,7 @@ class TTS(Node):
 
                         self.get_logger().info(f"Yaw is {yaw}")
 
-                        if abs(yaw) < 0.3:
+                        if abs(yaw) < 0.05:
                             self.move(0.0, 0.0)
                             self.integral_theta = 0.0
                             self.previous_err_theta = 0.0
@@ -195,16 +197,6 @@ class TTS(Node):
                             self.err_theta = yaw 
                             av = self.angular_pid()
                             self.move(0.0, av)
-                    else:
-                        # Keep looking for correct marker
-                        self.get_logger().info("[INFO] Searching state...")
-                        self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
-                        self.move(0.0, 0.3)
-                else:
-                    # Keep looking for correct marker
-                    self.get_logger().info("[INFO] Searching state...")
-                    self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
-                    self.move(0.0, 0.3)
             
             case ARUCO_STATE.DETECTED:
                 self.get_logger().info("[INFO] Detected state...")
@@ -226,8 +218,8 @@ class TTS(Node):
                 self.get_logger().info(f"[INFO] Detected marker is ID {markers.marker_ids[index]}")
 
                 # robot dog rpy
-                orientation = cur_odom.pose.pose.orientation
-                r, p, y = euler_from_quaternion([orientation.x, orientation.y, orientation.z, orientation.w])
+                # orientation = cur_odom.pose.pose.orientation
+                # r, p, y = euler_from_quaternion([orientation.x, orientation.y, orientation.z, orientation.w])
 
                 # obtain depth using Euclidean norm
                 marker_x = markers.poses[index].position.x
@@ -247,6 +239,7 @@ class TTS(Node):
                 # log info
                 self.get_logger().info(f"Current robot yaw: {yaw}")
                 self.get_logger().info(f"Current robot offset: {offset}")
+                self.get_logger().info(f"Current depth: {depth}")
 
                 # errors
                 self.err_dist = depth
@@ -254,12 +247,12 @@ class TTS(Node):
 
                 lv, av = 0.0, 0.0
 
-                if abs(self.err_theta) >= 0.6:
+                if abs(self.err_theta) >= 0.1:
                     av = self.angular_pid()
                 else:
                     av = 0.0
 
-                if abs(self.err_dist) >= 0.8:
+                if abs(self.err_dist) >= 0.7:
                     lv = self.linear_pid()
                 else:
                     self.get_logger().info(f"Goal distance is within tolerance")
@@ -274,6 +267,9 @@ class TTS(Node):
                     self.move(0.0, 0.0)
                     self.setState(ARUCO_STATE.GOAL)
                     return
+                
+                if offset >= 30:
+                    lv *= 0.3
 
                 self.move(lv, av)
 
@@ -302,7 +298,6 @@ class TTS(Node):
 
             case ARUCO_STATE.FAILED:
                 self.get_logger().info("[INFO] Failure state...")
-
                 # Stop the robot
                 self.move(0.0, 0.0)
 
@@ -310,20 +305,28 @@ class TTS(Node):
     def linear_pid(self):
         lv = 0.0
 
-        Kp_dist, Ki_dist, Kd_dist = 0.015, 0.01, 0.15
+        Kp_dist, Ki_dist, Kd_dist = 0.01, 0.05, 0.20
 
         proportional = Kp_dist * self.err_dist
 
         self.integral_dist += Ki_dist * self.err_dist * self.timer_period 
-        self.integral_dist = np.clip(self.integral_dist, -0.2, 0.2)
+        self.integral_dist = np.clip(self.integral_dist, -0.15, 0.15)
 
         derivative = Kd_dist * ((self.err_dist - self.previous_err_dist) / self.timer_period)
         derivative = np.clip(derivative, -0.2, 0.2)
 
         lv = proportional + self.integral_dist + derivative
 
-        linear_scale = np.clip(math.cos(self.err_theta), 0.1, 1.0)  # Range: 0.1 to 1.0
-        scaled_lv = lv * linear_scale
+        # linear_scale = np.clip(math.cos(self.err_theta), 0.1, 1.0)  # Range: 0.1 to 1.0
+        # scaled_lv = lv * linear_scale
+
+        max_angular_error = 0.9  # degrees (slow to 0 if error > 45°)
+
+        # Calculate speed scaling factor (0 to 1)
+        scaling_factor = max(0, 1 - (abs(self.err_theta) / max_angular_error))
+
+        # Apply to linear speed
+        lv = lv * scaling_factor
 
         lv = np.clip(lv, -0.5, 0.5) # m/s
 
@@ -335,25 +338,21 @@ class TTS(Node):
     def angular_pid(self):
         av = 0.0
 
-        Kp_theta, Ki_theta, Kd_theta = 0.1, 0.12, 0.15
-        Kp_theta = 0.1 * (1 - 0.8 * np.clip(self.err_dist / 4.0, 0.0, 1.0))  # Reduce Kp at long distances
-        Ki_theta = 0.12
-        Kd_theta = 0.15 * (1 + 0.5 * np.clip(self.err_dist / 4.0, 0.0, 1.0)) # Increase damping at long distances
-
+        Kp_theta, Ki_theta, Kd_theta = 0.15, 0.20, 0.1
         proportional = Kp_theta * self.err_theta
 
         self.integral_theta += Ki_theta * self.err_theta * self.timer_period 
         self.integral_theta = np.clip(self.integral_theta, -0.15, 0.15)
 
         derivative = Kd_theta * ((self.err_theta - self.previous_err_theta) / self.timer_period)
-        derivative = np.clip(derivative, -0.20, 0.20)
+        derivative = np.clip(derivative, -0.1, 0.1)
 
         av = proportional + self.integral_theta + derivative
-        av = np.clip(av, -0.5, 0.5)  # rad/s
+        av = np.clip(av, -0.7, 0.7)  # rad/s
 
         self.previous_err_theta = self.err_theta
 
-        return av
+        return -av
 
 def main():
     rclpy.init()
