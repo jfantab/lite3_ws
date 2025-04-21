@@ -147,8 +147,8 @@ class ArucoNode(rclpy.node.Node):
         )
 
         # Set up publishers
-        self.poses_pub = self.create_publisher(PoseArray, "aruco_poses", 10)
-        self.markers_pub = self.create_publisher(ArucoMarkers, "aruco_markers", 10)
+        self.poses_pub = self.create_publisher(PoseArray, "aruco_poses", 1)
+        self.markers_pub = self.create_publisher(ArucoMarkers, "aruco_markers", 1)
         self.aruco_img_pub = self.create_publisher(Image, "aruco_image", 10)
 
         # Set up fields for camera parameters

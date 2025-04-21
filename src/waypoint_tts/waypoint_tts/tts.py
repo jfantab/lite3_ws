@@ -56,22 +56,25 @@ class TTS(Node):
         self.previous_err_theta = 0.0
 
         ###
-        self.latest_markers = None
-        self.marker_mutex = Lock()
-        self.latest_odom = None 
-        self.odom_mutex = Lock()
+        # self.latest_markers = None
+        # self.marker_mutex = Lock()
+        # self.latest_odom = None 
+        # self.odom_mutex = Lock()
 
-        self.sub_cb_group = MutuallyExclusiveCallbackGroup()
-        self.timer_cb_group = MutuallyExclusiveCallbackGroup()
-        self.odom_cb_group = MutuallyExclusiveCallbackGroup()
+        # self.sub_cb_group = MutuallyExclusiveCallbackGroup()
+        # self.timer_cb_group = MutuallyExclusiveCallbackGroup()
+        # self.odom_cb_group = MutuallyExclusiveCallbackGroup()
 
-        self.marker_sub = self.create_subscription(ArucoMarkers, 'aruco_markers', self.marker_callback, 10, callback_group=self.sub_cb_group)
-        self.odom_sub = self.create_subscription(PoseWithCovarianceStamped, 'leg_odom', self.odom_callback, 10, callback_group=self.odom_cb_group)
+        self.marker_sub = self.create_subscription(ArucoMarkers, 'aruco_markers', self.marker_callback, 1)#, callback_group=self.sub_cb_group)
+        # self.odom_sub = self.create_subscription(PoseWithCovarianceStamped, 'leg_odom', self.odom_callback, 1, callback_group=self.odom_cb_group)
 
-        self.twist_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.twist_pub = self.create_publisher(Twist, '/cmd_vel', 1)
+
+        self.last_pub_time = self.get_clock().now()
+        self.max_rate = 10.0 
         
-        self.timer_period = 0.5
-        self.timer = self.create_timer(self.timer_period, self.timer_callback, callback_group=self.timer_cb_group)
+        # self.timer_period = 0.5
+        # self.timer = self.create_timer(self.timer_period, self.timer_callback, callback_group=self.timer_cb_group)
         
         ###
         self.state = ARUCO_STATE.SEARCHING
@@ -112,35 +115,26 @@ class TTS(Node):
         self.twist_pub.publish(msg)
         self.get_logger().info(f"Publishing Twist message: {msg}")
 
+    # def odom_callback(self, odom):
+    #     with self.odom_mutex:
+    #         self.latest_odom = odom 
+    #         self.get_logger().debug(f"New odom: {odom}")
+
     def marker_callback(self, markers):
-        with self.marker_mutex:
-            self.latest_markers = markers
-            self.get_logger().debug(f"New markers: {markers}")
-
-    def odom_callback(self, odom):
-        with self.odom_mutex:
-            self.latest_odom = odom 
-            self.get_logger().debug(f"New odom: {odom}")
-
-    # save images every 5 seconds 
-    # turn params super small, view images
-    # dynamic params as it gets closer
-
-    def timer_callback(self):
-        # check mutex
-        with self.marker_mutex:
-            markers = self.latest_markers
-
-        with self.odom_mutex:
-            cur_odom = self.latest_odom
+        # rate limiting /cmd_vel publishing
+        now = self.get_clock().now()
+        if ((now - self.last_pub_time).nanoseconds * 1e-9) < (1.0 / self.max_rate):
+            return  # Skip this update
+            
+        # with self.odom_mutex:
+        #     cur_odom = self.latest_odom
 
         # check if markers were detected
         if not markers:
             return
 
-        # TODO
-        if not cur_odom:
-            pass
+        # if not cur_odom:
+            # pass
 
         match self.state:
             case ARUCO_STATE.IDLE:
@@ -161,18 +155,14 @@ class TTS(Node):
                         index = markers.marker_ids.index(self.cur_id)
 
                         self.get_logger().info(f"Aruco marker detected with ID {markers.marker_ids[index]}")
-                        self.setState(ARUCO_STATE.ADJUSTING)
-                    else:
-                        # Keep looking for correct marker
-                        self.get_logger().info("[INFO] Searching state...")
-                        self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
-                        self.move(0.0, 0.3)
-
-                else:
-                    # Keep looking for correct marker
-                    self.get_logger().info("[INFO] Searching state...")
-                    self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
-                    self.move(0.0, 0.3)
+                        self.setState(ARUCO_STATE.DETECTED)
+                        return
+            
+                # Keep looking for correct marker
+                self.get_logger().info("[INFO] Searching state...")
+                self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
+                self.move(0.0, 0.1)
+                self.last_pub_time = now
 
             case ARUCO_STATE.ADJUSTING:
                 self.get_logger().info(f"[INFO] Adjusting state")
@@ -182,11 +172,13 @@ class TTS(Node):
                     if self.cur_id in markers.marker_ids:
                         self.get_logger().info(f"[INFO] Found marker with ID {self.cur_id}")
                         index = markers.marker_ids.index(self.cur_id)
+
+                        offset = markers.offsets[index]
                         yaw = markers.yaw_angles[index]
 
                         self.get_logger().info(f"Yaw is {yaw}")
 
-                        if abs(yaw) < 0.05:
+                        if abs(yaw) < 0.1:
                             self.move(0.0, 0.0)
                             self.integral_theta = 0.0
                             self.previous_err_theta = 0.0
@@ -197,7 +189,14 @@ class TTS(Node):
                             self.err_theta = yaw 
                             av = self.angular_pid()
                             self.move(0.0, av)
-            
+                            self.last_pub_time = now
+                else:
+                    self.move(0.0, 0.0)
+                    self.integral_theta = 0.0
+                    self.previous_err_theta = 0.0
+                    self.get_logger().info(f"Aruco marker with ID {markers.marker_ids[index]} lost")
+                    self.setState(ARUCO_STATE.SEARCHING)
+
             case ARUCO_STATE.DETECTED:
                 self.get_logger().info("[INFO] Detected state...")
 
@@ -233,9 +232,6 @@ class TTS(Node):
                 # offset
                 offset = markers.offsets[index]
 
-                # adjust for skew
-                # adjusted_depth = depth * math.cos(yaw) - marker_x * math.sin(yaw)
-
                 # log info
                 self.get_logger().info(f"Current robot yaw: {yaw}")
                 self.get_logger().info(f"Current robot offset: {offset}")
@@ -247,7 +243,7 @@ class TTS(Node):
 
                 lv, av = 0.0, 0.0
 
-                if abs(self.err_theta) >= 0.1:
+                if abs(self.err_theta) >= 0.01:
                     av = self.angular_pid()
                 else:
                     av = 0.0
@@ -267,11 +263,11 @@ class TTS(Node):
                     self.move(0.0, 0.0)
                     self.setState(ARUCO_STATE.GOAL)
                     return
-                
-                if offset >= 30:
-                    lv *= 0.3
+
+                self.get_logger().info(f"lv: {lv} | av: {av}")
 
                 self.move(lv, av)
+                self.last_pub_time = now
 
             case ARUCO_STATE.GOAL:
                 self.get_logger().info("[INFO] Goal state...")
@@ -304,23 +300,24 @@ class TTS(Node):
     # PID control for linear velocity
     def linear_pid(self):
         lv = 0.0
+        dt = 1.0 / self.max_rate
 
-        Kp_dist, Ki_dist, Kd_dist = 0.01, 0.05, 0.20
+        Kp_dist, Ki_dist, Kd_dist = 0.01, 0.08, 0.1
 
         proportional = Kp_dist * self.err_dist
 
-        self.integral_dist += Ki_dist * self.err_dist * self.timer_period 
-        self.integral_dist = np.clip(self.integral_dist, -0.15, 0.15)
+        self.integral_dist += Ki_dist * self.err_dist * dt 
+        self.integral_dist = np.clip(self.integral_dist, -0.1, 0.1)
 
-        derivative = Kd_dist * ((self.err_dist - self.previous_err_dist) / self.timer_period)
-        derivative = np.clip(derivative, -0.2, 0.2)
+        derivative = Kd_dist * ((self.err_dist - self.previous_err_dist) / dt)
+        derivative = np.clip(derivative, -0.15, 0.15)
 
         lv = proportional + self.integral_dist + derivative
 
         # linear_scale = np.clip(math.cos(self.err_theta), 0.1, 1.0)  # Range: 0.1 to 1.0
         # scaled_lv = lv * linear_scale
 
-        max_angular_error = 0.9  # degrees (slow to 0 if error > 45°)
+        max_angular_error = 0.4 # degrees (slow to 0 if error > 45°)
 
         # Calculate speed scaling factor (0 to 1)
         scaling_factor = max(0, 1 - (abs(self.err_theta) / max_angular_error))
@@ -337,22 +334,23 @@ class TTS(Node):
     # PID control for angular velocity
     def angular_pid(self):
         av = 0.0
-
-        Kp_theta, Ki_theta, Kd_theta = 0.15, 0.20, 0.1
+        dt = 1.0 / self.max_rate
+        
+        Kp_theta, Ki_theta, Kd_theta = 0.1, 0.004, 0.3
         proportional = Kp_theta * self.err_theta
 
-        self.integral_theta += Ki_theta * self.err_theta * self.timer_period 
-        self.integral_theta = np.clip(self.integral_theta, -0.15, 0.15)
+        self.integral_theta += Ki_theta * self.err_theta * dt 
+        self.integral_theta = np.clip(self.integral_theta, -0.01, 0.01)
 
-        derivative = Kd_theta * ((self.err_theta - self.previous_err_theta) / self.timer_period)
-        derivative = np.clip(derivative, -0.1, 0.1)
+        derivative = Kd_theta * ((self.err_theta - self.previous_err_theta) / dt)
+        derivative = np.clip(derivative, -0.2, 0.2)
 
         av = proportional + self.integral_theta + derivative
-        av = np.clip(av, -0.7, 0.7)  # rad/s
+        av = np.clip(av, -0.4, 0.4)  # rad/s
 
         self.previous_err_theta = self.err_theta
 
-        return -av
+        return av
 
 def main():
     rclpy.init()
