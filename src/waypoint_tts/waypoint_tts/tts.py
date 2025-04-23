@@ -3,11 +3,13 @@ import math
 import socket
 import time
 import numpy as np
+from collections import deque
 from enum import Enum
 from threading import Lock
 
 import rclpy 
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 from ament_index_python.packages import get_package_share_directory
@@ -56,25 +58,31 @@ class TTS(Node):
         self.previous_err_theta = 0.0
 
         ###
-        # self.latest_markers = None
-        # self.marker_mutex = Lock()
+        self.latest_marker = None
+        POSE_BUFFER_SIZE = 5
+        self.markers_buffer = deque(maxlen=POSE_BUFFER_SIZE)
+        self.latest_marker_time = None
+        self.marker_mutex = Lock()
         # self.latest_odom = None 
         # self.odom_mutex = Lock()
+        self.latest_pose = None 
+        self.pose_mutex = Lock()
 
-        # self.sub_cb_group = MutuallyExclusiveCallbackGroup()
-        # self.timer_cb_group = MutuallyExclusiveCallbackGroup()
+        self.sub_cb_group = MutuallyExclusiveCallbackGroup()
+        self.timer_cb_group = MutuallyExclusiveCallbackGroup()
         # self.odom_cb_group = MutuallyExclusiveCallbackGroup()
 
-        self.marker_sub = self.create_subscription(ArucoMarkers, 'aruco_markers', self.marker_callback, 1)#, callback_group=self.sub_cb_group)
+        self.marker_sub = self.create_subscription(ArucoMarkers, 'aruco_markers', self.marker_callback, 10, callback_group=self.sub_cb_group)
         # self.odom_sub = self.create_subscription(PoseWithCovarianceStamped, 'leg_odom', self.odom_callback, 1, callback_group=self.odom_cb_group)
 
-        self.twist_pub = self.create_publisher(Twist, '/cmd_vel', 1)
+        self.twist_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
-        self.last_pub_time = self.get_clock().now()
-        self.max_rate = 10.0 
+        self.last_pub_time = self.get_clock().now().nanoseconds
+        self.max_rate = 30.0 
+        self.MAX_STALE_TIME = 0.033
         
-        # self.timer_period = 0.5
-        # self.timer = self.create_timer(self.timer_period, self.timer_callback, callback_group=self.timer_cb_group)
+        self.timer_period = 1 / self.max_rate
+        self.timer = self.create_timer(self.timer_period, self.timer_callback, callback_group=self.timer_cb_group)
         
         ###
         self.state = ARUCO_STATE.SEARCHING
@@ -120,18 +128,48 @@ class TTS(Node):
     #         self.latest_odom = odom 
     #         self.get_logger().debug(f"New odom: {odom}")
 
-    def marker_callback(self, markers):
-        # rate limiting /cmd_vel publishing
-        now = self.get_clock().now()
-        if ((now - self.last_pub_time).nanoseconds * 1e-9) < (1.0 / self.max_rate):
-            return  # Skip this update
+    def marker_callback(self, marker):
+        with self.marker_mutex:
+            self.get_logger().info(f"New markers: {marker}")
+            self.markers_buffer.append(marker)
+            self.latest_marker_time = self.get_clock().now().nanoseconds
+            self.get_logger().info(f"New markers time: {self.latest_marker_time}")
+
+    def timer_callback(self):
+        with self.marker_mutex:
+            buffer = self.markers_buffer
+
+            self.get_logger().info(f"Current deque/buffer: {buffer}")
+
+            if not buffer:
+                self.move(0.0, 0.0)
+                self.setState(ARUCO_STATE.SEARCHING)
+                return
+                
+            now = self.get_clock().now().nanoseconds
+            self.get_logger().info(f"Timestamp subtractions: {[((now * 1e-9) - (p.header.stamp.sec + (p.header.stamp.nanosec * 1e-9))) for p in buffer]}")
+            valid_markers = [
+                p for p in buffer
+                if ((now * 1e-9) - (p.header.stamp.sec + (p.header.stamp.nanosec * 1e-9))) < 0.05
+            ]
+
+            self.get_logger().info(f"Valid markers: {valid_markers}")
+
+            if len(valid_markers) == 0:
+                self.move(0.0, 0.0)
+                self.setState(ARUCO_STATE.SEARCHING)
+                return
             
-        # with self.odom_mutex:
-        #     cur_odom = self.latest_odom
+            markers = valid_markers[-1]
+
+            self.get_logger().info(f"Most recent marker: {markers}")
 
         # check if markers were detected
         if not markers:
             return
+
+        # with self.odom_mutex:
+        #     cur_odom = self.latest_odom
 
         # if not cur_odom:
             # pass
@@ -157,7 +195,7 @@ class TTS(Node):
                         self.get_logger().info(f"Aruco marker detected with ID {markers.marker_ids[index]}")
                         self.setState(ARUCO_STATE.DETECTED)
                         return
-            
+
                 # Keep looking for correct marker
                 self.get_logger().info("[INFO] Searching state...")
                 self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
@@ -178,7 +216,7 @@ class TTS(Node):
 
                         self.get_logger().info(f"Yaw is {yaw}")
 
-                        if abs(yaw) < 0.1:
+                        if abs(yaw) < (0.01 + (depth * 0.1)):
                             self.move(0.0, 0.0)
                             self.integral_theta = 0.0
                             self.previous_err_theta = 0.0
@@ -336,7 +374,7 @@ class TTS(Node):
         av = 0.0
         dt = 1.0 / self.max_rate
         
-        Kp_theta, Ki_theta, Kd_theta = 0.1, 0.004, 0.3
+        Kp_theta, Ki_theta, Kd_theta = 0.05, 0.004, 0.3
         proportional = Kp_theta * self.err_theta
 
         self.integral_theta += Ki_theta * self.err_theta * dt 
@@ -356,10 +394,18 @@ def main():
     rclpy.init()
     
     tts = TTS()
-    rclpy.spin(tts)
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(tts)
+    
+    try: 
+        executor.spin()
+    finally:
+        tts.destroy_node()
+        executor.shutdown()
+    # rclpy.spin(tts)
 
-    tts.destroy_node()
-    rclpy.shutdown()
+    # tts.destroy_node()
+    # rclpy.shutdown()
 
 if __name__ == "__main__":
     main()

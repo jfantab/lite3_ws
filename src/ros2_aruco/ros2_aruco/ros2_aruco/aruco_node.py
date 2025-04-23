@@ -180,6 +180,10 @@ class ArucoNode(rclpy.node.Node):
         if self.info_msg is None:
             self.get_logger().warn("No camera info has been received!")
             return
+        
+        self.get_logger().info("Camera info received")
+
+        # start = self.get_clock().now()
 
         cv_image = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding="mono8")
         cv_image = cv2.undistort(cv_image, self.intrinsic_mat, self.distortion)
@@ -239,11 +243,11 @@ class ArucoNode(rclpy.node.Node):
                     fx = self.intrinsic_mat[0][0]
                     angle = np.arctan2(offset, fx)
                     corrected_angle = (angle + np.pi) % (2 * np.pi) - np.pi
-                    # self.get_logger().info("===========================================")
-                    # self.get_logger().info(f"z distance: {tvec[2][0]}")
-                    # self.get_logger().info(f"offset: {offset} | fx: {fx} | angle: {angle}")
-                    # self.get_logger().info(f"corrected_angle: {corrected_angle}")
-                    # self.get_logger().info("============================================")
+                    self.get_logger().info("===========================================")
+                    self.get_logger().info(f"z distance: {tvec[2][0]}")
+                    self.get_logger().info(f"offset: {offset} | fx: {fx} | angle: {angle}")
+                    self.get_logger().info(f"corrected_angle: {corrected_angle}")
+                    self.get_logger().info("============================================")
                     
                     offsets.append(float(offset))
                     yaws.append(float(corrected_angle))
@@ -283,20 +287,25 @@ class ArucoNode(rclpy.node.Node):
                 markers.marker_ids.append(marker_id[0])
 
             ### For debugging in RViz
-            # # Draw detected markers and their IDs on the image
-            # cv2.aruco.drawDetectedMarkers(cv_image, corners, marker_ids)
+            # Draw detected markers and their IDs on the image
+            cv2.aruco.drawDetectedMarkers(cv_image, corners, marker_ids)
 
-            # # Draw axes
-            # for i in range(len(marker_ids)):
-            #     cv2.drawFrameAxes(cv_image, self.intrinsic_mat, self.distortion,
-            #                     rvecs[i], tvecs[i], self.marker_size)
+            # Draw axes
+            for i in range(len(marker_ids)):
+                cv2.drawFrameAxes(cv_image, self.intrinsic_mat, self.distortion,
+                                rvecs[i], tvecs[i], self.marker_size)
 
-            # # Convert annotated OpenCV image back to ROS2 Image message
-            # annotated_image_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding="mono8")
-            # annotated_image_msg.header = img_msg.header
+            # Convert annotated OpenCV image back to ROS2 Image message
+            annotated_image_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding="mono8")
+            annotated_image_msg.header = img_msg.header
+            
+            # end = self.get_clock().now()
 
-            # # Publish the annotated image
-            # self.aruco_img_pub.publish(annotated_image_msg)
+            # time_taken = (end - start).nanoseconds * 1e-9
+            # self.get_logger().info(f"Time taken for ArUco marker detection: {time_taken}")
+
+            # Publish the annotated image
+            self.aruco_img_pub.publish(annotated_image_msg)
 
             # Publish pose and markers
             self.poses_pub.publish(pose_array)
