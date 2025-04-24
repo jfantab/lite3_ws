@@ -295,7 +295,7 @@ class ArucoNode(rclpy.node.Node):
                 cv2.drawFrameAxes(cv_image, self.intrinsic_mat, self.distortion,
                                 rvecs[i], tvecs[i], self.marker_size)
 
-            # Convert annotated OpenCV image back to ROS2 Image message
+            # Convert annotated OpenCV image back to ROS2 Image message 
             annotated_image_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding="mono8")
             annotated_image_msg.header = img_msg.header
             

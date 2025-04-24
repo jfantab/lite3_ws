@@ -59,7 +59,6 @@ class RS_Aruco_TTS(Node):
 
     def __init__(self):
         super().__init__("rs_aruco_tts")
-
         # Defining timer callback
         self.max_rate = 5
         self.image_timer_period = 1 / self.max_rate
@@ -97,6 +96,7 @@ class RS_Aruco_TTS(Node):
         self.aruco_parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.aruco_parameters.cornerRefinementWinSize = 5
         self.detector = cv2.aruco.ArucoDetector(self.aruco_dictionary, self.aruco_parameters)
+        self.bridge = CvBridge()
 
         # Initialize deques
         MAX_MARKER_POSES = 5
@@ -197,6 +197,9 @@ class RS_Aruco_TTS(Node):
             )
             options = "\n".join([s for s in dir(cv2.aruco) if s.startswith("DICT")])
             self.get_logger().error("valid options: {}".format(options))
+
+        # ArUco image publisher
+        self.aruco_img_pub = self.create_publisher(Image, "aruco_image", 10)
 
     def shutdown_hook(self):
         self.pipeline.stop()
@@ -316,7 +319,7 @@ class RS_Aruco_TTS(Node):
                     marker_centers.append(marker_center)
 
                     # Calculate the yaw
-                    offset = marker_center[0] - center_x
+                    offset = center_x - marker_center[0] 
                     fx = self.intrinsic_mat[0][0]
                     angle = np.arctan2(offset, fx)
                     corrected_angle = (angle + np.pi) % (2 * np.pi) - np.pi
@@ -327,7 +330,7 @@ class RS_Aruco_TTS(Node):
                     self.get_logger().info("============================================")
 
                     offsets.append(float(offset))
-                    yaws.append(float(corrected_angle))
+                    # yaws.append(float(corrected_angle))
 
                     # self.get_logger().info(f"{cv_image.shape} | {center_x}, {center_y}")
                     # self.get_logger().info(f"corner: {corner[0]}")
@@ -347,9 +350,10 @@ class RS_Aruco_TTS(Node):
                 pose.position.x = tvecs[i][0][0]
                 pose.position.y = tvecs[i][1][0]
                 pose.position.z = tvecs[i][2][0]
-
+                
                 rot_matrix = np.eye(4)
                 rot_matrix[0:3, 0:3] = cv2.Rodrigues(np.array(rvecs[i]))[0]
+                yaw = np.arctan2(rot_matrix[1,0], rot_matrix[0,0])
                 quat = tf_transformations.quaternion_from_matrix(rot_matrix)
 
                 pose.orientation.x = quat[0]
@@ -359,7 +363,7 @@ class RS_Aruco_TTS(Node):
 
                 # pose_array.poses.append(pose)
                 markers.poses.append(pose)
-                markers.yaw_angles.append(float(yaws[i]))
+                markers.yaw_angles.append(float(yaw))
                 markers.offsets.append(float(offsets[i]))
                 markers.marker_ids.append(marker_id[0])
 
@@ -373,9 +377,16 @@ class RS_Aruco_TTS(Node):
                                     rvecs[i], tvecs[i], self.marker_size)
 
         markers.header = header
+        
+        # Convert annotated image to ROS 2 topic
+        annotated_image_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding="mono8")
+        annotated_image_msg.header = header 
 
         with self.markers_mutex:
             self.markers_buffer.append(markers)
+        
+        # Publish the annotated image
+        self.aruco_img_pub.publish(annotated_image_msg)
 
     def setState(self, state):
         self.state = state
@@ -399,6 +410,22 @@ class RS_Aruco_TTS(Node):
                 return
 
             markers = buffer[-1]
+
+            # Get the last 3 markers from the buffer
+            last_3 = self.markers_buffer[-3:]
+
+            # Example: average the z distance of the first pose in each marker
+            z_values = [m.poses[0].position.z for m in last_3 if len(m.poses) > 0]
+            if z_values:
+                avg_z = sum(z_values) / len(z_values)
+            else:
+                avg_z = None  # or handle as appropriate
+            
+            yaw_values = [m.yaw_angles[0] for m in last_3 if len(m.yaw_angles) > 0]
+            if yaw_values:
+                avg_yaw = sum(yaw_values) / len(yaw_values)
+            else:
+                avg_yaw = None
 
             # self.get_logger().info(f"Buffer: {buffer}")
             
@@ -425,7 +452,7 @@ class RS_Aruco_TTS(Node):
         if not markers:
             return
 
-        self.get_logger().info(f"Markers: {markers}")
+        # self.get_logger().info(f"Markers: {markers}")
         
         match self.state:
             case ARUCO_STATE.IDLE:
@@ -464,12 +491,11 @@ class RS_Aruco_TTS(Node):
                         self.get_logger().info(f"[INFO] Found marker with ID {self.cur_id}")
                         index = markers.marker_ids.index(self.cur_id)
 
-                        offset = markers.offsets[index]
-                        yaw = markers.yaw_angles[index]
+                        yaw = avg_yaw
 
                         self.get_logger().info(f"Yaw is {yaw}")
 
-                        if abs(yaw) < (0.01 + (depth * 0.1)):
+                        if abs(yaw) < 0.1:
                             self.move(0.0, 0.0)
                             self.integral_theta = 0.0
                             self.previous_err_theta = 0.0
@@ -518,7 +544,7 @@ class RS_Aruco_TTS(Node):
                 depth = math.sqrt(marker_x**2 + marker_y**2 + marker_z**2)
 
                 # obtain yaw to turn robot
-                yaw = markers.yaw_angles[index]
+                yaw = avg_yaw
 
                 # offset
                 offset = markers.offsets[index]
@@ -534,7 +560,7 @@ class RS_Aruco_TTS(Node):
 
                 lv, av = 0.0, 0.0
 
-                if abs(self.err_theta) >= 0.1:
+                if abs(self.err_theta) >= 0.2:
                     av = self.angular_pid()
                 else:
                     av = 0.0
@@ -627,15 +653,15 @@ class RS_Aruco_TTS(Node):
     def angular_pid(self):
         av = 0.0
         dt = 1.0 / self.max_rate
-        
-        Kp_theta, Ki_theta, Kd_theta = 0.05, 0.004, 0.3
+
+        Kp_theta, Ki_theta, Kd_theta = 0.05, 0.04, 0.1
         proportional = Kp_theta * self.err_theta
 
         self.integral_theta += Ki_theta * self.err_theta * dt 
         self.integral_theta = np.clip(self.integral_theta, -0.01, 0.01)
 
         derivative = Kd_theta * ((self.err_theta - self.previous_err_theta) / dt)
-        derivative = np.clip(derivative, -0.2, 0.2)
+        derivative = np.clip(derivative, -0.1, 0.1)
 
         av = proportional + self.integral_theta + derivative
         av = np.clip(av, -0.4, 0.4)  # rad/s
