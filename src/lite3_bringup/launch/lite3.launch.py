@@ -72,5 +72,5 @@ def generate_launch_description():
         # rviz,
         rs,
         aruco, 
-        waypoint
+        # waypoint
     ])

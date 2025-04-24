@@ -232,7 +232,7 @@ class ArucoNode(rclpy.node.Node):
                     self.intrinsic_mat,
                     self.distortion
                 )
-                    
+                
                 if success:
                     # Get center
                     marker_center = [np.sum(corner[0][:,0]) // 4, np.sum(corner[0][:,1]) // 4]
