@@ -78,8 +78,8 @@ class TTS(Node):
         self.twist_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
         self.last_pub_time = self.get_clock().now().nanoseconds
-        self.max_rate = 30.0 
-        self.MAX_STALE_TIME = 0.033
+        self.max_rate = 20.0 
+        self.MAX_STALE_TIME = 1.2
         
         self.timer_period = 1 / self.max_rate
         self.timer = self.create_timer(self.timer_period, self.timer_callback, callback_group=self.timer_cb_group)
@@ -130,27 +130,27 @@ class TTS(Node):
 
     def marker_callback(self, marker):
         with self.marker_mutex:
-            self.get_logger().info(f"New markers: {marker}")
+            # self.get_logger().info(f"New markers: {marker}")
             self.markers_buffer.append(marker)
             self.latest_marker_time = self.get_clock().now().nanoseconds
-            self.get_logger().info(f"New markers time: {self.latest_marker_time}")
+            # self.get_logger().info(f"New markers time: {self.latest_marker_time}")
 
     def timer_callback(self):
         with self.marker_mutex:
             buffer = self.markers_buffer
 
-            self.get_logger().info(f"Current deque/buffer: {buffer}")
+            # self.get_logger().info(f"Current deque/buffer: {buffer}")
 
             if not buffer:
                 self.move(0.0, 0.0)
                 self.setState(ARUCO_STATE.SEARCHING)
                 return
-                
+            
             now = self.get_clock().now().nanoseconds
             self.get_logger().info(f"Timestamp subtractions: {[((now * 1e-9) - (p.header.stamp.sec + (p.header.stamp.nanosec * 1e-9))) for p in buffer]}")
             valid_markers = [
                 p for p in buffer
-                if ((now * 1e-9) - (p.header.stamp.sec + (p.header.stamp.nanosec * 1e-9))) < 0.05
+                if ((now * 1e-9) - (p.header.stamp.sec + (p.header.stamp.nanosec * 1e-9))) < self.MAX_STALE_TIME
             ]
 
             self.get_logger().info(f"Valid markers: {valid_markers}")
