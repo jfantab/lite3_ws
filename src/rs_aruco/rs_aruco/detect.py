@@ -412,7 +412,7 @@ class RS_Aruco_TTS(Node):
             markers = buffer[-1]
 
             # Get the last 3 markers from the buffer
-            last_3 = self.markers_buffer[-3:]
+            last_3 = list(self.markers_buffer)[-3:]
 
             # Example: average the z distance of the first pose in each marker
             z_values = [m.poses[0].position.z for m in last_3 if len(m.poses) > 0]
@@ -565,7 +565,7 @@ class RS_Aruco_TTS(Node):
                 else:
                     av = 0.0
 
-                if abs(self.err_dist) >= 0.5:
+                if abs(self.err_dist) >= 0.3:
                     lv = self.linear_pid()
                 else:
                     self.get_logger().info(f"Goal distance is within tolerance")
@@ -620,7 +620,7 @@ class RS_Aruco_TTS(Node):
         lv = 0.0
         dt = 1.0 / self.max_rate
 
-        Kp_dist, Ki_dist, Kd_dist = 0.01, 0.08, 0.1
+        Kp_dist, Ki_dist, Kd_dist = 0.01, 0.04, 0.1
 
         proportional = Kp_dist * self.err_dist
 
