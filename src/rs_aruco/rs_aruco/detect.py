@@ -117,7 +117,7 @@ class RS_Aruco_TTS(Node):
         self.state = ARUCO_STATE.SEARCHING
 
         self.TTS_ACTIVE = True
-        self.cur_id = 2
+        self.cur_id = 0
         self.goal_id = 3
         self.landmarks = [
             {
@@ -263,7 +263,7 @@ class RS_Aruco_TTS(Node):
         cv_image = cv2.undistort(image, self.intrinsic_mat, self.distortion_mat)
 
         height, width = cv_image.shape
-        
+
         center_x = height // 2
         center_y = width // 2
 
