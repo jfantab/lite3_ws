@@ -40,13 +40,13 @@ for d in departments:
         speech_file_path_wav_long
     ])
 
-    subprocess.run([
-        "ffmpeg", "-ss", "0", 
-        "-i", speech_file_path_wav_long,
-        "-t", "5", 
-        "-c", "copy",
-        speech_file_path_wav
-    ])
+    # subprocess.run([
+    #     "ffmpeg", "-ss", "0", 
+    #     "-i", speech_file_path_wav_long,
+    #     "-t", "5", 
+    #     "-c", "copy",
+    #     speech_file_path_wav
+    # ])
 
 # ffmpeg -ss $start -i "~/tts/wav_long/$file" -t $duration -c copy "~/tts/wav/$file";
 

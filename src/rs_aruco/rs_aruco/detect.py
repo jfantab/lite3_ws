@@ -34,19 +34,6 @@ from std_msgs.msg import Float64, Float64MultiArray, Header
 # ROS 2 package utilities
 from ament_index_python.packages import get_package_share_directory
 
-def tts_file(file):
-    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
-    ctrl_addr = ('192.168.1.120', 45678)
-
-    server.bind(('192.168.1.65', 54321))
-
-    filename = bytes(file, 'utf-8')
-    server.sendto(filename, ctrl_addr)
-
-    msg, addr = server.recvfrom(1024)
-    result = msg.decode('utf-8')
-    return result
-
 class ARUCO_STATE(Enum):
     IDLE = 1
     SEARCHING = 2
@@ -129,9 +116,9 @@ class RS_Aruco_TTS(Node):
         # State machine parameters
         self.state = ARUCO_STATE.SEARCHING
 
-        self.TTS_ACTIVE = False
-        self.cur_id = 0
-        self.goal_id = 2
+        self.TTS_ACTIVE = True
+        self.cur_id = 2
+        self.goal_id = 3
         self.landmarks = [
             {
                 "label": "eng1",
@@ -276,7 +263,7 @@ class RS_Aruco_TTS(Node):
         cv_image = cv2.undistort(image, self.intrinsic_mat, self.distortion_mat)
 
         height, width = cv_image.shape
-
+        
         center_x = height // 2
         center_y = width // 2
 
@@ -599,13 +586,11 @@ class RS_Aruco_TTS(Node):
                 self.get_logger().info("[INFO] Reached destination")
 
                 if self.TTS_ACTIVE:
-                    audio_filename = self.landmarks[marker_id]["label"] + ".wav"
-                    tts_file(audio_filename)
+                    audio_filename = self.landmarks[self.cur_id]["label"] + ".wav"
+                    self.tts_file(audio_filename)
 
                 self.landmarks[self.cur_id]["reached"] = True
                 self.cur_id += 1
-
-                time.sleep(1)
 
                 self.setState(ARUCO_STATE.SEARCHING)
                 return
@@ -654,7 +639,7 @@ class RS_Aruco_TTS(Node):
         av = 0.0
         dt = 1.0 / self.max_rate
 
-        Kp_theta, Ki_theta, Kd_theta = 0.05, 0.04, 0.1
+        Kp_theta, Ki_theta, Kd_theta = 0.1, 0.08, 0.1
         proportional = Kp_theta * self.err_theta
 
         self.integral_theta += Ki_theta * self.err_theta * dt 
@@ -669,6 +654,27 @@ class RS_Aruco_TTS(Node):
         self.previous_err_theta = self.err_theta
 
         return av
+        
+    def tts_file(self, file):
+        server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
+        server.settimeout(15.0)
+        ctrl_addr = ('192.168.1.120', 45678)
+
+        try:
+            server.bind(('192.168.1.65', 54321))
+            
+            filename = bytes(file, 'utf-8')
+            server.sendto(filename, ctrl_addr)
+
+            msg, addr = server.recvfrom(1024)
+            result = msg.decode('utf-8')
+            return result
+        except socket.timeout:
+            self.get_logger().info("Socket timeout")
+            server.close()
+            return "Good"
+        finally:
+            server.close()
 
 def main():
     rclpy.init()
