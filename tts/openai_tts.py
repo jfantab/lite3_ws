@@ -11,15 +11,17 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 VOICE="ash"
 
 # departments = ["mscs", "msse", "nursing", "psych"]
-departments = ["eng1", "eng2", "eng3", "eng4", "eng5"]
+# departments = ["eng1", "eng2", "eng3", "eng4", "eng5"]
+departments = ["boccardo", "clark", "dudley", "inter_sci", "library", "macquarrie", "student_union"]
 
 for d in departments:
 
-    with open(f"txt/{d}.txt", "r") as fp:
+    with open(f"txt2/{d}.txt", "r") as fp:
         text = fp.read()
 
     speech_file_path_mp3 = Path(__file__).parent / "mp3" / f"{d}.mp3"
     speech_file_path_wav_long = Path(__file__).parent / "wav_long" / f"{d}.wav"
+    speech_file_path_building = Path(__file__).parent / "building_wav" / f"{d}.wav"
     speech_file_path_wav = Path(__file__).parent / "wav" / f"{d}.wav"
 
     with client.audio.speech.with_streaming_response.create(
@@ -37,7 +39,8 @@ for d in departments:
         "-ac", "1",
         "-sample_fmt",
         "s16",
-        speech_file_path_wav_long
+        # speech_file_path_wav_long
+        speech_file_path_building
     ])
 
     # subprocess.run([
