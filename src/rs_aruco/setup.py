@@ -23,7 +23,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'rs_aruco_tts = rs_aruco.detect:main'
+            'rs_aruco_tts = rs_aruco.detect:main',
+            'dictate_tts = rs_aruco.dictate:main'
         ],
     },
 )

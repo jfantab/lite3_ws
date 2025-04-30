@@ -42,10 +42,10 @@ class ARUCO_STATE(Enum):
     GOAL = 5
     FAILED = 6
 
-class RS_Aruco_TTS(Node):
+class Dictate_TTS(Node):
 
     def __init__(self):
-        super().__init__("rs_aruco_tts")
+        super().__init__("Dictate_TTS")
         # self.my_addr = ('172.20.10.6', 54321)
         self.my_addr = ('192.168.1.65', 54321)
 
@@ -70,11 +70,6 @@ class RS_Aruco_TTS(Node):
         # Start streaming
         self.pipeline.start(config)
 
-        self.device_time_start = None
-        self.host_time_start = None 
-        
-        self.sync_time()
-
         # Initialize ArUco detector along with its parameters
         self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_250)
         self.aruco_parameters = cv2.aruco.DetectorParameters()
@@ -92,55 +87,41 @@ class RS_Aruco_TTS(Node):
         MAX_MARKER_POSES = 5
         self.markers_buffer = deque(maxlen=MAX_MARKER_POSES)
 
-        MAX_FRAMES = 5
-        self.frames_deque = deque(maxlen=MAX_FRAMES)
-
         # Mutexes
         self.markers_mutex = Lock()
-        self.frames_mutex = Lock()
-
-        self.MAX_STALE_TIME = 0.2
-
-        # /cmd_vel publisher
-        self.twist_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-
-        self.last_pub_time = self.get_clock().now().nanoseconds
-
-        # PID parameters
-        self.err_dist = 0
-        self.err_theta = 0
-        self.err_offset = 0
-
-        self.integral_dist = 0.0
-        self.previous_err_dist = 0.0
-        self.integral_theta = 0.0
-        self.previous_err_theta = 0.0
 
         # State machine parameters
         self.state = ARUCO_STATE.SEARCHING
 
+        self.cur_id = None
         self.TTS_ACTIVE = True
-        self.cur_id = 0
-        self.goal_id = 3
         self.landmarks = [
             {
-                "label": "eng1",
+                "label": "boccardo",
                 "reached": False
             },
             {
-                "label": "eng2",
+                "label": "clark",
                 "reached": False
             },
             {
-                "label": "eng3",
+                "label": "dudley",
                 "reached": False
             },
             {
-                "label": "eng4",
+                "label": "inter_sci",
                 "reached": False
             },
             {
-                "label": "eng5",
+                "label": "library",
+                "reached": False
+            },
+            {
+                "label": "macquarrie",
+                "reached": False
+            },
+            {
+                "label": "student_union",
                 "reached": False
             }
         ]
@@ -194,23 +175,6 @@ class RS_Aruco_TTS(Node):
     def shutdown_hook(self):
         self.pipeline.stop()
 
-    def sync_time(self):
-        try: 
-            frames = self.pipeline.wait_for_frames()
-            color_frame = frames.get_color_frame()
-
-            if not color_frame:
-                raise RuntimeError("No frames received during initialization")
-            
-            self.device_time_start = color_frame.get_frame_metadata(rs.frame_metadata_value.sensor_timestamp) * 1e3
-            self.host_time_start = time.time_ns()
-            
-            self.get_logger().info(f"device_time_start: {self.device_time_start}")
-            self.get_logger().info(f"host_time_start: {self.host_time_start}")
-
-        except Exception as e: 
-            self.get_logger().warn(f"Exception occurred during time sync: {e}")
-            
     def image_timer_callback(self):
         try:
             frames = self.pipeline.poll_for_frames() # Drain buffer
@@ -231,18 +195,18 @@ class RS_Aruco_TTS(Node):
             if not color_frame:
                 return
 
-            # Retrieve timestamp
-            current_device_time = color_frame.get_frame_metadata(rs.frame_metadata_value.sensor_timestamp) * 1e3
-            elapsed_device_time = current_device_time - self.device_time_start
-            color_frame_timestamp = self.host_time_start + elapsed_device_time
+            ### Retrieve timestamp
+            # current_device_time = color_frame.get_frame_metadata(rs.frame_metadata_value.sensor_timestamp) * 1e3
+            # elapsed_device_time = current_device_time - self.device_time_start
+            # color_frame_timestamp = self.host_time_start + elapsed_device_time
 
-            color_frame_sec = color_frame_timestamp // 1e9
-            color_frame_nanosec = color_frame_timestamp % 1e9
+            # color_frame_sec = color_frame_timestamp // 1e9
+            # color_frame_nanosec = color_frame_timestamp % 1e9
   
-            # Create header
-            header = Header()
-            header.stamp = Time(seconds=color_frame_sec, nanoseconds=color_frame_nanosec).to_msg()
-            header.frame_id = "camera_frame"
+            ### Create header
+            # header = Header()
+            # header.stamp = Time(seconds=color_frame_sec, nanoseconds=color_frame_nanosec).to_msg()
+            # header.frame_id = "camera_frame"
             
             # Convert to OpenCV format
             raw_image = np.asanyarray(color_frame.get_data())
@@ -251,7 +215,7 @@ class RS_Aruco_TTS(Node):
             gray = cv2.cvtColor(raw_image, cv2.COLOR_BGR2GRAY)
 
             # Pass grayscale image to ArUco processing code
-            self.process_image(gray, header)
+            self.process_image(gray)
 
             # Add PID controller code
             self.navigate()
@@ -261,7 +225,7 @@ class RS_Aruco_TTS(Node):
         except Exception as e:
             self.get_logger().warn(f"Error encountered: {e}")
 
-    def process_image(self, image, header):
+    def process_image(self, image):
         self.get_logger().info(f"[INFO] Processing image for ArUco marker")
         cv_image = cv2.undistort(image, self.intrinsic_mat, self.distortion_mat)
 
@@ -320,14 +284,6 @@ class RS_Aruco_TTS(Node):
                     self.get_logger().info("============================================")
 
                     offsets.append(float(offset))
-                    # yaws.append(float(corrected_angle))
-
-                    # self.get_logger().info(f"{cv_image.shape} | {center_x}, {center_y}")
-                    # self.get_logger().info(f"corner: {corner[0]}")
-                    # self.get_logger().info(f"offset: {offset}")
-                    # self.get_logger().info(f"fx: {fx}")
-                    # self.get_logger().info(f"angle: {corrected_angle}")
-                    # self.get_logger().info(f"aruco marker center: {marker_center}")
 
                     rvecs.append(rvec)
                     tvecs.append(tvec)
@@ -366,166 +322,48 @@ class RS_Aruco_TTS(Node):
                 cv2.drawFrameAxes(cv_image, self.intrinsic_mat, self.distortion_mat,
                                     rvecs[i], tvecs[i], self.marker_size)
 
-        markers.header = header
+        # markers.header = header
         
-        # Convert annotated image to ROS 2 topic
-        annotated_image_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding="mono8")
-        annotated_image_msg.header = header 
+        ### Convert annotated image to ROS 2 topic
+        # annotated_image_msg = self.bridge.cv2_to_imgmsg(cv_image, encoding="mono8")
+        # annotated_image_msg.header = header 
 
         with self.markers_mutex:
             self.markers_buffer.append(markers)
         
-        # Publish the annotated image
-        self.aruco_img_pub.publish(annotated_image_msg)
+        ### Publish the annotated image
+        # self.aruco_img_pub.publish(annotated_image_msg)
 
-    def setState(self, state):
-        self.state = state
-
-    def move(self, linear_velocity, angular_velocity, y_velocity=0.0):
-        msg = Twist()
-        msg.linear.x = linear_velocity
-        msg.linear.y = y_velocity
-        msg.angular.z = angular_velocity
-        self.twist_pub.publish(msg)
-        self.get_logger().info(f"Publishing Twist message: {msg}")
-        
     def navigate(self):
+        self.get_logger().info("Starting navigation...")
         with self.markers_mutex:
             now = self.get_clock().now().nanoseconds
             buffer = self.markers_buffer
 
+            self.get_logger().info(f"buffer: {buffer}")
+
             if not buffer or len(buffer) == 0:
-                self.move(0.0, 0.0)
-                self.setState(ARUCO_STATE.SEARCHING)
                 return
 
             markers = buffer[-1]
+            self.cur_id = markers.marker_ids[-1]
 
-            # Get the last 3 markers from the buffer
-            last_3 = list(self.markers_buffer)[-3:]
-
-            # Example: average the z distance of the first pose in each marker
-            z_values = [m.poses[0].position.z for m in last_3 if len(m.poses) > 0]
-            if z_values:
-                avg_z = sum(z_values) / len(z_values)
-            else:
-                avg_z = None  # or handle as appropriate
-            
-            yaw_values = [m.yaw_angles[0] for m in last_3 if len(m.yaw_angles) > 0]
-            if yaw_values:
-                avg_yaw = sum(yaw_values) / len(yaw_values)
-            else:
-                avg_yaw = None
-
-            # self.get_logger().info(f"Buffer: {buffer}")
-            
-            # self.get_logger().info(f"Current time: {now*1e-9}")
-            # self.get_logger().info(f"Buffer timestamps: {[p.header.stamp for p in buffer]}")
-            # self.get_logger().info(f"Timestamp subtractions: {[((now * 1e-9) - (p.header.stamp.sec + (p.header.stamp.nanosec*1e-9))) for p in buffer]}")
-            # valid_markers = [
-            #     p for p in buffer
-            #     if ((now * 1e-9) - (p.header.stamp.sec + (p.header.stamp.nanosec*1e-9))) < self.MAX_STALE_TIME
-            # ]
-
-            # self.get_logger().info(f"Valid markers: {valid_markers}")
-
-            # if len(valid_markers) == 0:
-            #     self.move(0.0, 0.0)
-            #     self.setState(ARUCO_STATE.SEARCHING)
-            #     return
-            
-            # markers = valid_markers[-1]
-
-            # self.get_logger().info(f"Most recent marker: {markers}")
+        self.get_logger().info(f"markers: {markers} | markers.marker_ids[-1]: {markers.marker_ids[-1]}")
+        self.get_logger().info(f"self.cur_id: {self.cur_id}")
 
         # check if markers were detected
         if not markers:
             return
 
-        # self.get_logger().info(f"Markers: {markers}")
-        
         match self.state:
-            case ARUCO_STATE.IDLE:
-                self.get_logger().info("[INFO] Idle state...")
-
-                self.move(0.0, 0.0)
-
-            case ARUCO_STATE.SEARCHING:
-                if self.cur_id > self.goal_id:
-                    self.setState(ARUCO_STATE.IDLE)
-                    return
-
-                if markers and markers.marker_ids:
-                    self.get_logger().info(f"[INFO] markers.marker_ids: {markers.marker_ids}")
-
-                    if self.cur_id in markers.marker_ids:
-                        self.get_logger().info(f"[INFO] Found marker with ID {self.cur_id}")
-                        index = markers.marker_ids.index(self.cur_id)
-
-                        self.get_logger().info(f"Aruco marker detected with ID {markers.marker_ids[index]}")
-                        self.setState(ARUCO_STATE.DETECTED)
-                        return
-
-                # Keep looking for correct marker
-                self.get_logger().info("[INFO] Searching state...")
-                self.get_logger().info(f"[INFO] Searching for ID {self.cur_id}")
-                self.move(0.0, 0.3)
-                self.last_pub_time = now
-
-            case ARUCO_STATE.ADJUSTING:
-                self.get_logger().info(f"[INFO] Adjusting state")
-                if markers and markers.marker_ids:
-                    self.get_logger().info(f"[INFO] markers.marker_ids: {markers.marker_ids}")
-
-                    if self.cur_id in markers.marker_ids:
-                        self.get_logger().info(f"[INFO] Found marker with ID {self.cur_id}")
-                        index = markers.marker_ids.index(self.cur_id)
-
-                        yaw = avg_yaw
-
-                        self.get_logger().info(f"Yaw is {yaw}")
-
-                        if abs(yaw) < 0.1:
-                            self.move(0.0, 0.0)
-                            self.integral_theta = 0.0
-                            self.previous_err_theta = 0.0
-                            self.get_logger().info(f"Aruco marker detected with ID {markers.marker_ids[index]}")
-                            self.setState(ARUCO_STATE.DETECTED)
-                        else:
-                            self.get_logger().info("[INFO] Getting into position")
-                            self.err_theta = yaw 
-                            av = self.angular_pid()
-                            self.move(0.0, av)
-                            self.last_pub_time = now
-                else:
-                    self.move(0.0, 0.0)
-                    self.integral_theta = 0.0
-                    self.previous_err_theta = 0.0
-                    self.get_logger().info(f"Aruco marker with ID {markers.marker_ids[index]} lost")
-                    self.setState(ARUCO_STATE.SEARCHING)
-
             case ARUCO_STATE.DETECTED:
                 self.get_logger().info("[INFO] Detected state...")
-
-                if not markers: 
-                    self.move(0.0, 0.0)
-                    self.setState(ARUCO_STATE.SEARCHING)
-                    return
-                
-                if self.cur_id not in markers.marker_ids:
-                    self.move(0.0, 0.0)
-                    self.setState(ARUCO_STATE.SEARCHING)
-                    return
 
                 self.get_logger().info(f"[INFO] Moving towards detected marker...")
 
                 # get correct marker
                 index = markers.marker_ids.index(self.cur_id)
                 self.get_logger().info(f"[INFO] Detected marker is ID {markers.marker_ids[index]}")
-
-                # robot dog rpy
-                # orientation = cur_odom.pose.pose.orientation
-                # r, p, y = euler_from_quaternion([orientation.x, orientation.y, orientation.z, orientation.w])
 
                 # obtain depth using Euclidean norm
                 marker_x = markers.poses[index].position.x
@@ -544,37 +382,8 @@ class RS_Aruco_TTS(Node):
                 self.get_logger().info(f"Current robot offset: {offset}")
                 self.get_logger().info(f"Current depth: {depth}")
 
-                # errors
-                self.err_dist = depth
-                self.err_theta = yaw
-
-                lv, av = 0.0, 0.0
-
-                if abs(self.err_theta) >= 0.1:
-                    av = self.angular_pid()
-                else:
-                    av = 0.0
-
-                if abs(self.err_dist) >= 0.3:
-                    lv = self.linear_pid()
-                else:
-                    self.get_logger().info(f"Goal distance is within tolerance")
-                    lv, av = 0.0, 0.0
-
-                    self.integral_dist = 0.0
-                    self.previous_err_dist = 0.0
-
-                    self.integral_theta = 0.0
-                    self.previous_err_theta = 0.0
-                    
-                    self.move(0.0, 0.0)
+                if abs(depth) <= 0.4:
                     self.setState(ARUCO_STATE.GOAL)
-                    return
-
-                self.get_logger().info(f"lv: {lv} | av: {av}")
-
-                self.move(lv, av)
-                self.last_pub_time = now
 
             case ARUCO_STATE.GOAL:
                 self.get_logger().info("[INFO] Goal state...")
@@ -594,74 +403,10 @@ class RS_Aruco_TTS(Node):
 
                 self.landmarks[self.cur_id]["reached"] = True
                 self.cur_id += 1
-
-                self.setState(ARUCO_STATE.SEARCHING)
-                return
-
-            case ARUCO_STATE.FAILED:
-                self.get_logger().info("[INFO] Failure state...")
-                # Stop the robot
-                self.move(0.0, 0.0)
-
-    # PID control for linear velocity
-    def linear_pid(self):
-        lv = 0.0
-        dt = 1.0 / self.max_rate
-
-        Kp_dist, Ki_dist, Kd_dist = 0.4, 0.15, 0.1
-
-        proportional = Kp_dist * self.err_dist
-
-        self.integral_dist += Ki_dist * self.err_dist * dt 
-        self.integral_dist = np.clip(self.integral_dist, -0.1, 0.1)
-
-        derivative = Kd_dist * ((self.err_dist - self.previous_err_dist) / dt)
-        derivative = np.clip(derivative, -0.15, 0.15)
-
-        lv = proportional + self.integral_dist + derivative
-
-        # linear_scale = np.clip(math.cos(self.err_theta), 0.1, 1.0)  # Range: 0.1 to 1.0
-        # scaled_lv = lv * linear_scale
-
-        max_angular_error = 0.4 # degrees (slow to 0 if error > 45°)
-
-        # Calculate speed scaling factor (0 to 1)
-        scaling_factor = max(0, 1 - (abs(self.err_theta) / max_angular_error))
-
-        # Apply to linear speed
-        lv = lv * scaling_factor
-
-        lv = np.clip(lv, -0.5, 0.5) # m/s
-
-        self.previous_err_dist = self.err_dist
-
-        return lv
-
-    # PID control for angular velocity
-    def angular_pid(self):
-        av = 0.0
-        dt = 1.0 / self.max_rate
-
-        Kp_theta, Ki_theta, Kd_theta = 0.5, 0.2, 0.2
-
-        proportional = Kp_theta * self.err_theta
-
-        self.integral_theta += Ki_theta * self.err_theta * dt 
-        self.integral_theta = np.clip(self.integral_theta, -0.1, 0.1)
-
-        derivative = Kd_theta * ((self.err_theta - self.previous_err_theta) / dt)
-        derivative = np.clip(derivative, -0.15, 0.15)
-
-        av = proportional + self.integral_theta + derivative
-        av = np.clip(av, -0.5, 0.5)  # rad/s
-
-        self.previous_err_theta = self.err_theta
-
-        return av
         
     def tts_file(self, file):
         server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
-        server.settimeout(15.0)
+        server.settimeout(45.0)
         ctrl_addr = ('192.168.1.120', 45678)
 
         try:
@@ -682,7 +427,7 @@ class RS_Aruco_TTS(Node):
 
 def main():
     rclpy.init()
-    tts = RS_Aruco_TTS()
+    tts = Dictate_TTS()
 
     try:
         rclpy.spin(tts)
