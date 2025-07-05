@@ -9,3 +9,6 @@ tts/wav_long/*
 
 **/__pycache__/
 **/*.pyc
+
+voice/chroma_db/*
+voice/.vscode/*
