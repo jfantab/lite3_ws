@@ -2,50 +2,47 @@ import pyaudio
 import wave
 import whisper
 
-def record_audio():
-    FORMAT = pyaudio.paInt16
-    CHANNELS = 1
-    RATE = 16000
-    CHUNK = 1024
-    RECORD_SECONDS = 5
+class Recorder():
 
-    audio = pyaudio.PyAudio()
+    def __init__(self):
+        pass 
+        
+    def record_audio(self):
+        FORMAT = pyaudio.paInt16
+        CHANNELS = 1
+        RATE = 16000
+        CHUNK = 1024
+        RECORD_SECONDS = 5
 
-    print("Recording now...")
+        print("Recording now...")
+        audio = pyaudio.PyAudio()
+        stream = audio.open(
+                format=FORMAT,
+                channels=CHANNELS,
+                rate=RATE,
+                input=True,
+                frames_per_buffer=CHUNK,
+            )
 
-    stream = audio.open(
-            format=FORMAT,
-            channels=CHANNELS,
-            rate=RATE,
-            input=True,
-            frames_per_buffer=CHUNK,
-        )
+        frames = []
+        for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+            data = stream.read(CHUNK)
+            frames.append(data)
 
-    frames = []
+        stream.stop_stream()
+        stream.close()
+        audio.terminate()
+        print("Recording finished")
 
-    for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-        data = stream.read(CHUNK)
-        frames.append(data)
+        wavFile = wave.open("output.wav", "wb")
+        wavFile.setnchannels(CHANNELS)
+        wavFile.setsampwidth(audio.get_sample_size(FORMAT))
+        wavFile.setframerate(RATE)
+        wavFile.writeframes(b''.join(frames))
+        wavFile.close()
 
-    stream.stop_stream()
-    stream.close()
-    audio.terminate()
-
-    print("Recording finished")
-
-    wavFile = wave.open("output.wav", "wb")
-    wavFile.setnchannels(CHANNELS)
-    wavFile.setsampwidth(audio.get_sample_size(FORMAT))
-    wavFile.setframerate(RATE)
-    wavFile.writeframes(b''.join(frames))
-    wavFile.close()
-
-def whisper_transcribe():
-    print("Transcribing")
-
-    model = whisper.load_model("base")
-    result = model.transcribe("output.wav")
-    print(result["text"])
-
-    return result["text"]
-
+    def whisper_transcribe(self):
+        print("Transcribing")
+        model = whisper.load_model("base")
+        result = model.transcribe("output.wav")
+        return result["text"]

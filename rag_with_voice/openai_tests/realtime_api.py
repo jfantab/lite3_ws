@@ -23,12 +23,19 @@ headers = {
 
 ### CHECKING DEVICES ###
 
-# audio = pyaudio.PyAudio()
-# info = audio.get_host_api_info_by_index(0)
-# numdevices = info.get('deviceCount')
-# for i in range(0, numdevices):
-#         if (audio.get_device_info_by_host_api_device_index(0, i).get('maxInputChannels')) > 0:
-#             print("Input Device id ", i, " - ", audio.get_device_info_by_host_api_device_index(0, i).get('name'))
+audio = pyaudio.PyAudio()
+info = audio.get_host_api_info_by_index(0)
+numdevices = info.get('deviceCount')
+for i in range(0, numdevices):
+    if (audio.get_device_info_by_host_api_device_index(0, i).get('maxInputChannels')) > 0:
+        print("Input Device id ", i, " - ", audio.get_device_info_by_host_api_device_index(0, i).get('name'))
+
+p = pyaudio.PyAudio()
+device_count = p.get_device_count()
+for i in range(device_count):
+    info = p.get_device_info_by_index(i)
+    if info.get('maxOutputChannels') > 0:
+        print(f"Output Device id {i} - {info.get('name')}")
 
 ### SOCKETS ###
 
@@ -64,7 +71,7 @@ async def conversation_loop(ws):
             
             frames = []
             for _ in range(0, int(RATE / CHUNK * 3)):
-                data = stream.read(CHUNK, exception_on_overflow=False)
+                data = stream.read(CHUNK)
                 frames.append(data)
 
             audio_bytes = b''.join(frames)
@@ -80,16 +87,21 @@ async def conversation_loop(ws):
 
             print("Waiting for GPT response...")
             while True:
-                result = await ws.recv()
-                event = json.loads(result)
-
-                if event["type"] == "response.audio.delta":
-                    audio_data = base64.b64decode(event["delta"])
-                    
-                    output_stream.write(audio_data)
-                    
-                if event["type"] == "response.done":
+                try:
+                    result = await ws.recv()
+                except ws.ConnectionClosedOK:
+                    print("Connection closed, exiting...")
                     break
+
+            event = json.loads(result)
+
+            if event["type"] == "response.audio.delta":
+                audio_data = base64.b64decode(event["delta"])
+                    
+                output_stream.write(audio_data)
+                    
+            if event["type"] == "response.done":
+                break
             
     except Exception as e:
         print(f"Exception happened: {e}")

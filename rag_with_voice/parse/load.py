@@ -23,7 +23,7 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
 ### PATHS ###
 
-HOME = "/Users/johnlu/Documents/rag_with_voice"
+HOME = "/home/jfantab/lite3_ws/rag_with_voice"
 PREFIX = "pdfs"
 
 PATH = os.path.join(HOME, PREFIX)
@@ -50,7 +50,7 @@ class CustomOpenAIEmbeddings():
         return self.embedding_model.embed_query(text)
 
 chroma_client = chromadb.PersistentClient(path=os.path.join(HOME, "chroma_db"))
-collection = chroma_client.create_collection(name="new_collection", embedding_function=OpenAIEmbeddings())
+collection = chroma_client.create_collection(name="new_collection", embedding_function=CustomOpenAIEmbeddings())
 
 ### PDF parsing ###
 
